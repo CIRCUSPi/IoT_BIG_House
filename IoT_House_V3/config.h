@@ -32,4 +32,55 @@
 #define NUMPIXELS 4
 #define LCD_I2C_ADDR 0x27
 
+#define TRIG_STR "TRIG"
+#define IDLE_STR "IDLE"
+
+#define PAGE_MAX 2
+#define ID_NULL "--------"
+
+#define _TIME_KEY_POLLING_uS 50000UL
+#define _TIME_KEY_REPEAT_START_uS 1000000UL
+#define _TIME_KEY_REPEAT_WORK_uS 300000UL
+
+#define _KEYCODE_NOKEY 0x00
+#define _KEYCODE_F_EDGE 0x01
+#define _KEYCODE_REPEAT 0x02
+#define _KEYCODE_PRESSED 0x03
+#define _KEYCODE_R_EDGE 0x04
+
+#define WS2812_WHITE 0xFFFFFF
+#define WS2812_RED 0xFF0000
+#define WS2812_GREEN 0x00FF00
+#define WS2812_BLUE 0x0000FF
+
+typedef enum
+{
+    AUTO   = 65,     // A
+    MANUAL = 77,     // M
+} SYS_MODE_E;
+
+typedef enum
+{
+    JOY_LEFT,
+    JOY_DOWN,
+    JOY_RIGHT,
+    JOY_UP,
+    JOY_IDLE,
+} JOYSTICK_DIR_E;
+
+struct KEY_POLLING_STRUCT {
+    uint32_t dwTimeSlot_Polling;
+    uint32_t dwTimeSlot_Repeat;
+    uint32_t dwRepeatTime;
+    uint32_t dwOrgtTime;
+    bool     bPressKey;
+    bool     bEnableRepeat;
+    uint16_t uAnalogLevel;
+    bool     uLess_operator;
+    byte     uPin;
+    byte     uActiveLevel;
+    byte     uRepeatCount;
+    byte     uReserved;
+};     // 22-byte
+
 #endif /* _CONFIG_H */
