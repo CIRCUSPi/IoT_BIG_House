@@ -30,3 +30,10 @@
 *.exe
 *.out
 *.app
+
+.vscode/
+build_temp/
+.ipynb_checkpoints/
+__pycache__/
+jupyter_lab.bat
+**.ipynb
