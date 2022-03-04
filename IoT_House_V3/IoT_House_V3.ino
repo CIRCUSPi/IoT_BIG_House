@@ -33,11 +33,17 @@ struct KEY_POLLING_STRUCT m_KeyPolling_JoyX_L_Tag;
 struct KEY_POLLING_STRUCT m_KeyPolling_JoyX_R_Tag;
 struct KEY_POLLING_STRUCT m_KeyPolling_JoyY_U_Tag;
 struct KEY_POLLING_STRUCT m_KeyPolling_JoyY_D_Tag;
+struct KEY_POLLING_STRUCT m_KeyPolling_JoyBtn_Tag;
+struct KEY_POLLING_STRUCT m_KeyPolling_Pir_Tag;
+struct KEY_POLLING_STRUCT m_KeyPolling_Fire_Tag;
 
 byte m_uKeyCode_JoyX_L;
 byte m_uKeyCode_JoyX_R;
 byte m_uKeyCode_JoyY_U;
 byte m_uKeyCode_JoyY_D;
+byte m_uKeyCode_JoyBtn;
+byte m_uKeyCode_Pir;
+byte m_uKeyCode_Fire;
 
 void setup()
 {
@@ -61,10 +67,13 @@ void setup()
     obj_ws2812.clear();
     obj_ws2812.show();
 
-    Init_Polling_Button(JOYSTICK_X_PIN, 0, true, 1500, &m_KeyPolling_JoyX_L_Tag);
-    Init_Polling_Button(JOYSTICK_X_PIN, 0, false, 3500, &m_KeyPolling_JoyX_R_Tag);
-    Init_Polling_Button(JOYSTICK_Y_PIN, 0, true, 1500, &m_KeyPolling_JoyY_U_Tag);
-    Init_Polling_Button(JOYSTICK_Y_PIN, 0, false, 3500, &m_KeyPolling_JoyY_D_Tag);
+    Init_Polling_Button(0, &m_KeyPolling_JoyX_L_Tag);
+    Init_Polling_Button(0, &m_KeyPolling_JoyX_R_Tag);
+    Init_Polling_Button(0, &m_KeyPolling_JoyY_U_Tag);
+    Init_Polling_Button(0, &m_KeyPolling_JoyY_D_Tag);
+    Init_Polling_Button(0, &m_KeyPolling_JoyBtn_Tag);
+    Init_Polling_Button(0, &m_KeyPolling_Pir_Tag);
+    Init_Polling_Button(0, &m_KeyPolling_Fire_Tag);
 }
 
 void loop()
@@ -75,10 +84,10 @@ void loop()
     // Get Sensor Data
     Task_ReadSensorData();
     Task_GetRFIDUID();
-
     Task_LCD();
     Task_Joystick();
     Task_WS2812();
+    // Task_Buzzer();
 #endif
 }
 
@@ -128,10 +137,18 @@ void lcd_print(uint8_t col, uint8_t row, char *data)
 
 void Task_Joystick()
 {
+    // default pullup
+    m_KeyPolling_JoyX_L_Tag.bFlag = !(analogRead(JOYSTICK_X_PIN) < 1500);
+    m_KeyPolling_JoyX_R_Tag.bFlag = !(analogRead(JOYSTICK_X_PIN) > 3500);
+    m_KeyPolling_JoyY_U_Tag.bFlag = !(analogRead(JOYSTICK_Y_PIN) < 1500);
+    m_KeyPolling_JoyY_D_Tag.bFlag = !(analogRead(JOYSTICK_Y_PIN) > 3500);
+    m_KeyPolling_JoyBtn_Tag.bFlag = m_joystick_btn;
+
     m_uKeyCode_JoyX_L = Polling_Button_Repeat(&m_KeyPolling_JoyX_L_Tag);
     m_uKeyCode_JoyX_R = Polling_Button_Repeat(&m_KeyPolling_JoyX_R_Tag);
     m_uKeyCode_JoyY_U = Polling_Button_Repeat(&m_KeyPolling_JoyY_U_Tag);
     m_uKeyCode_JoyY_D = Polling_Button_Repeat(&m_KeyPolling_JoyY_D_Tag);
+    m_uKeyCode_JoyBtn = Polling_Button_Repeat(&m_KeyPolling_JoyBtn_Tag);
 
     if (m_uKeyCode_JoyX_L == _KEYCODE_F_EDGE) {
         cur_page--;
@@ -154,16 +171,20 @@ void Task_ReadSensorData(void)
     uint32_t cur_millis = millis();
     if (cur_millis > timer) {
         timer = cur_millis + 200;
-#if DEBUG_MODE
+#if HARDWARE_DEBUG
         M_DEBUG_PRINTLN("Sensor sampling");
 #endif
-        m_temperature  = obj_dht11.readTemperature(false);
-        m_humidity     = obj_dht11.readHumidity(false);
-        m_light_raw    = analogRead(LIGHT_PIN);
-        m_pir          = !digitalRead(PIR_PIN);
-        m_joystick_btn = digitalRead(JOYSTICK_BTN_PIN);
-        m_fire         = !digitalRead(FIRE_PIN);
+        m_temperature = obj_dht11.readTemperature(false);
+        m_humidity    = obj_dht11.readHumidity(false);
     }
+    m_light_raw                 = analogRead(LIGHT_PIN);
+    m_joystick_btn              = digitalRead(JOYSTICK_BTN_PIN);
+    m_pir                       = !digitalRead(PIR_PIN);
+    m_fire                      = !digitalRead(FIRE_PIN);
+    m_KeyPolling_Pir_Tag.bFlag  = !m_pir;
+    m_KeyPolling_Fire_Tag.bFlag = !m_fire;
+    m_uKeyCode_Pir              = Polling_Button_Repeat(&m_KeyPolling_Pir_Tag);
+    m_uKeyCode_Fire             = Polling_Button_Repeat(&m_KeyPolling_Fire_Tag);
 }
 
 void Task_GetRFIDUID(void)
@@ -198,6 +219,8 @@ void Task_GetRFIDUID(void)
 
 void Task_WS2812(void)
 {
+    static uint32_t timer = 0;
+
     if (m_uKeyCode_JoyX_L == _KEYCODE_F_EDGE) {
         ws2812SetShow(JOY_LEFT, WS2812_WHITE);
     } else if (m_uKeyCode_JoyX_R == _KEYCODE_F_EDGE) {
@@ -211,12 +234,37 @@ void Task_WS2812(void)
         obj_ws2812.clear();
         obj_ws2812.show();
     }
+
+    uint32_t cur_millis = millis();
+    if (cur_millis > timer) {
+        timer              = cur_millis + 200;
+        uint8_t brightness = map(m_light_raw, 0, 3500, 2, 100);
+        obj_ws2812.setBrightness(brightness);
+    }
 }
 
 void ws2812SetShow(uint16_t idx, uint32_t color)
 {
     obj_ws2812.setPixelColor(idx, color);
     obj_ws2812.show();
+}
+
+void Task_Buzzer(void)
+{
+    static uint32_t timer = 0;
+    if (m_uKeyCode_Pir == _KEYCODE_F_EDGE) {
+        tone(BUZZER_PIN, BUZZER_Si);
+        timer = millis() + 2000;
+    } else if (m_uKeyCode_Pir == _KEYCODE_R_EDGE || millis() > timer) {
+        noTone(BUZZER_PIN);
+    }
+
+    if (m_uKeyCode_Fire == _KEYCODE_F_EDGE) {
+        tone(BUZZER_PIN, BUZZER_Do);
+        timer = millis() + 2000;
+    } else if (m_uKeyCode_Fire == _KEYCODE_R_EDGE || millis() > timer) {
+        noTone(BUZZER_PIN);
+    }
 }
 
 //--------------------------------------------------------
@@ -237,14 +285,7 @@ byte Polling_Button_Repeat(struct KEY_POLLING_STRUCT *pTag)
     // Process Polling Key
     pTag->dwTimeSlot_Polling = dwTime;
 
-    pinMode(pTag->uPin, INPUT_PULLUP);
-    delayMicroseconds(10);
-    bool level;
-    if (pTag->uLess_operator)
-        level = analogRead(pTag->uPin) > pTag->uAnalogLevel;
-    else
-        level = analogRead(pTag->uPin) < pTag->uAnalogLevel;
-    byte uPinLevel = (level ^ pTag->uActiveLevel) & 0x01;
+    byte uPinLevel = (pTag->bFlag ^ pTag->uActiveLevel) & 0x01;
     if (uPinLevel > 0) {     // Key is not pressed
         pTag->bPressKey = false;
 
@@ -284,13 +325,10 @@ void FillBytes(byte *pDst, byte fillByte, byte uCount)
     }
 }
 
-void Init_Polling_Button(byte uPin, byte uActiveLevel, bool uLess_operator, uint16_t uAnalogLevel, struct KEY_POLLING_STRUCT *pTag)
+void Init_Polling_Button(byte uActiveLevel, struct KEY_POLLING_STRUCT *pTag)
 {
     FillBytes((byte *)pTag, 0x00, sizeof(KEY_POLLING_STRUCT));
-    pTag->uPin           = uPin;
-    pTag->uAnalogLevel   = uAnalogLevel;
-    pTag->uLess_operator = uLess_operator;
-    pTag->uActiveLevel   = uActiveLevel;
+    pTag->uActiveLevel = uActiveLevel;
 }
 
 #if HARDWARE_DEBUG

@@ -53,6 +53,14 @@
 #define WS2812_GREEN 0x00FF00
 #define WS2812_BLUE 0x0000FF
 
+#define BUZZER_Do 523
+#define BUZZER_Re 587
+#define BUZZER_Mi 659
+#define BUZZER_Fa 698
+#define BUZZER_So 784
+#define BUZZER_La 880
+#define BUZZER_Si 988
+
 typedef enum
 {
     AUTO   = 65,     // A
@@ -75,12 +83,10 @@ struct KEY_POLLING_STRUCT {
     uint32_t dwOrgtTime;
     bool     bPressKey;
     bool     bEnableRepeat;
-    uint16_t uAnalogLevel;
-    bool     uLess_operator;
-    byte     uPin;
     byte     uActiveLevel;
     byte     uRepeatCount;
     byte     uReserved;
+    bool     bFlag;
 };     // 22-byte
 
 #endif /* _CONFIG_H */
