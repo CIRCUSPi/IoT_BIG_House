@@ -1,1 +1,0 @@
-This is the library for driving the 1602 I2C LCD module (with Hitachi HD44780U and NXP PCF8574A/PCF8574) on LinkIt 7697. It's based on the work from Francisco Malpartida (https://bitbucket.org/fmalpartida/new-liquidcrystal/downloads/).
