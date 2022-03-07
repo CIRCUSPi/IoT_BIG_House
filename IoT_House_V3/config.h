@@ -35,7 +35,9 @@
 #define TRIG_STR "TRIG"
 #define IDLE_STR "IDLE"
 
-#define PAGE_MAX 2
+#define AUTO_MODE_PAGE_MAX 2
+#define MANUAL_MODE_PAGE_MAX 1
+#define SET_MODE_PAGE_MAX 1
 #define ID_NULL "--------"
 
 #define _TIME_KEY_POLLING_uS 50000UL
@@ -61,20 +63,26 @@
 #define BUZZER_La 880
 #define BUZZER_Si 988
 
+/* EEPROM config Start Address */
+#define EEPROM_ADDR 0x0
+
 typedef enum
 {
-    AUTO   = 65,     // A
-    MANUAL = 77,     // M
+    AUTO_MODE,
+    MANUAL_MODE,
+    SET_MODE,
+    MAX_MODE,
 } SYS_MODE_E;
 
 typedef enum
 {
-    JOY_LEFT,
-    JOY_DOWN,
-    JOY_RIGHT,
-    JOY_UP,
-    JOY_IDLE,
-} JOYSTICK_DIR_E;
+    WS2812_LEFT,
+    WS2812_DOWN,
+    WS2812_RIGHT,
+    WS2812_UP,
+    WS2812_ALL,
+    WS2812_CLOSE,
+} WS2812_MODE_E;
 
 struct KEY_POLLING_STRUCT {
     uint32_t dwTimeSlot_Polling;
@@ -88,5 +96,19 @@ struct KEY_POLLING_STRUCT {
     byte     uReserved;
     bool     bFlag;
 };     // 22-byte
+
+typedef struct {
+    char    mode_tag;
+    uint8_t page_max;
+} sys_modes_t;
+
+typedef struct {
+    char wifi_ssid[30];
+    char wifi_pass[30];
+    char rfid_uid[8];
+    char mqtt_user[30];
+    char mqtt_pass[60];
+    char device_id[30];
+} config_E;     // 188-byte
 
 #endif /* _CONFIG_H */

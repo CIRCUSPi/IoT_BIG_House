@@ -1,6 +1,7 @@
 #include "config.h"
 #include <Adafruit_NeoPixel.h>
 #include <DHT.h>
+#include <EEPROM.h>
 #include <LiquidCrystal_I2C.h>
 #include <MFRC522.h>
 #include <SPI.h>
@@ -22,12 +23,11 @@ uint16_t m_joystick_x   = 0;
 uint16_t m_joystick_y   = 0;
 bool     m_joystick_btn = 0;
 bool     m_fire         = 0;
-String   card_uid       = ID_NULL;
+String   detect_rfid_id = ID_NULL;
 /* #endregion */
 
-uint8_t cur_page     = 1;
-uint8_t mode         = AUTO;
-uint8_t joystick_dir = JOY_IDLE;
+uint8_t cur_page = 1;
+uint8_t cur_mode = AUTO_MODE;
 
 struct KEY_POLLING_STRUCT m_KeyPolling_JoyX_L_Tag;
 struct KEY_POLLING_STRUCT m_KeyPolling_JoyX_R_Tag;
@@ -44,6 +44,16 @@ byte m_uKeyCode_JoyY_D;
 byte m_uKeyCode_JoyBtn;
 byte m_uKeyCode_Pir;
 byte m_uKeyCode_Fire;
+
+sys_modes_t sys_modes[3] = {
+     {.mode_tag = 'A', .page_max = AUTO_MODE_PAGE_MAX  },
+     {.mode_tag = 'M', .page_max = MANUAL_MODE_PAGE_MAX},
+     {.mode_tag = 'S', .page_max = SET_MODE_PAGE_MAX   }
+};
+
+config_E config;
+uint32_t show_rfid_timeout = 0;
+bool     buzzer_rfid_flag  = 0;
 
 void setup()
 {
@@ -67,6 +77,9 @@ void setup()
     obj_ws2812.clear();
     obj_ws2812.show();
 
+    /* read EEPROM */
+    EEPROM.get(EEPROM_ADDR, config);
+
     Init_Polling_Button(0, &m_KeyPolling_JoyX_L_Tag);
     Init_Polling_Button(0, &m_KeyPolling_JoyX_R_Tag);
     Init_Polling_Button(0, &m_KeyPolling_JoyY_U_Tag);
@@ -83,21 +96,23 @@ void loop()
 #else
     // Get Sensor Data
     Task_ReadSensorData();
-    Task_GetRFIDUID();
+    Task_RFID();
     Task_LCD();
     Task_Joystick();
     Task_WS2812();
-    // Task_Buzzer();
+    Task_Buzzer();
 #endif
 }
 
 void Task_LCD(void)
 {
     static uint32_t timer    = 0;
-    static uint8_t  pre_page = 0;
+    static uint8_t  pre_page = 0, pre_mode = 0;
 
-    if (pre_page != cur_page) {
-        pre_page = cur_page;
+    if (pre_page != cur_page || pre_mode != cur_mode) {
+        pre_page       = cur_page;
+        pre_mode       = cur_mode;
+        detect_rfid_id = ID_NULL;
         obj_lcd.clear();
     }
 
@@ -105,23 +120,51 @@ void Task_LCD(void)
         timer         = millis() + 150;
         char buff[20] = {0};
 
-        sprintf(buff, "   %s  %c", "IoT House V3.0", mode);
+        sprintf(buff, "   %s  %c", "IoT House V3.0", sys_modes[cur_mode].mode_tag);
         lcd_print(0, 0, buff);
-        switch (cur_page) {
-        case 1: {
-            sprintf(buff, " Temp:%.0f  PIR :%s ", m_temperature, m_pir ? TRIG_STR : IDLE_STR);
-            lcd_print(0, 1, buff);
-            sprintf(buff, " Humi:%.0f  Fire:%s ", m_humidity, m_fire ? TRIG_STR : IDLE_STR);
-            lcd_print(0, 3, buff);
+        switch (cur_mode) {
+        case AUTO_MODE: {
+            switch (cur_page) {
+            case 1: {
+                sprintf(buff, " Temp:%.0f  PIR :%s ", m_temperature, m_pir ? TRIG_STR : IDLE_STR);
+                lcd_print(0, 1, buff);
+                sprintf(buff, " Humi:%.0f  Fire:%s ", m_humidity, m_fire ? TRIG_STR : IDLE_STR);
+                lcd_print(0, 3, buff);
+            } break;
+            case 2: {
+                sprintf(buff, "   Light:%04d       ", m_light_raw);
+                lcd_print(0, 1, buff);
+                sprintf(buff, "   RFID :%8s", detect_rfid_id.c_str());
+                lcd_print(0, 3, buff);
+            } break;
+            default:
+                break;
+            }
+            // All page functions in automatic mode are implemented here
+            if (millis() > show_rfid_timeout) {
+                if (detect_rfid_id != ID_NULL) {
+                    detect_rfid_id = ID_NULL;
+                }
+            }
         } break;
-        case 2: {
-            sprintf(buff, "   Light:%04d       ", m_light_raw);
-            lcd_print(0, 1, buff);
-            sprintf(buff, "   RFID :%8s", card_uid.c_str());
-            lcd_print(0, 3, buff);
+        case MANUAL_MODE: {
+            switch (cur_page) {
+            case 1: {
+            } break;
+            default:
+                break;
+            }
         } break;
-        case 3: {
-
+        case SET_MODE: {
+            switch (cur_page) {
+            case 1: {
+                lcd_print(0, 1, (char *)"Input New RFID Card:");
+                sprintf(buff, "New Card :%8s", detect_rfid_id.c_str());
+                lcd_print(0, 3, buff);
+            } break;
+            default:
+                break;
+            }
         } break;
         default:
             break;
@@ -150,15 +193,51 @@ void Task_Joystick()
     m_uKeyCode_JoyY_D = Polling_Button_Repeat(&m_KeyPolling_JoyY_D_Tag);
     m_uKeyCode_JoyBtn = Polling_Button_Repeat(&m_KeyPolling_JoyBtn_Tag);
 
-    if (m_uKeyCode_JoyX_L == _KEYCODE_F_EDGE) {
-        cur_page--;
+    switch (cur_mode) {
+    case AUTO_MODE: {
+        switch (cur_page) {
+        case 1:
+        case 2: {
+            if (m_uKeyCode_JoyX_L == _KEYCODE_F_EDGE) {
+                cur_page--;
+            }
+            if (m_uKeyCode_JoyX_R == _KEYCODE_F_EDGE) {
+                cur_page++;
+            }
+            if (m_uKeyCode_JoyBtn == _KEYCODE_F_EDGE) {
+                change_mode(SET_MODE);
+            }
+        } break;
+        default:
+            break;
+        }
+    } break;
+    case MANUAL_MODE: {
+        switch (cur_page) {
+        case 1: {
+        } break;
+        default:
+            break;
+        }
+    } break;
+    case SET_MODE: {
+        switch (cur_page) {
+        case 1: {
+            if (m_uKeyCode_JoyBtn == _KEYCODE_F_EDGE) {
+                change_mode(AUTO_MODE);
+            }
+        } break;
+        default:
+            break;
+        }
+    } break;
+    default:
+        break;
     }
-    if (m_uKeyCode_JoyX_R == _KEYCODE_F_EDGE) {
-        cur_page++;
-    }
+
     // check page range
-    if (cur_page > PAGE_MAX) {
-        cur_page = PAGE_MAX;
+    if (cur_page > sys_modes[cur_mode].page_max) {
+        cur_page = sys_modes[cur_mode].page_max;
     } else if (cur_page < 1) {
         cur_page = 1;
     }
@@ -187,17 +266,11 @@ void Task_ReadSensorData(void)
     m_uKeyCode_Fire             = Polling_Button_Repeat(&m_KeyPolling_Fire_Tag);
 }
 
-void Task_GetRFIDUID(void)
+void Task_RFID(void)
 {
-    static uint32_t timer = 0, timer2 = 0;
+    static uint32_t timer = 0;
 
     uint32_t cur_millis = millis();
-    if (cur_millis > timer2) {
-        if (card_uid != ID_NULL) {
-            card_uid = ID_NULL;
-        }
-    }
-
     if (cur_millis > timer) {
         timer = cur_millis + 200;
         if (!obj_rc522.PICC_IsNewCardPresent()) {
@@ -206,31 +279,60 @@ void Task_GetRFIDUID(void)
         if (!obj_rc522.PICC_ReadCardSerial()) {
             return;
         }
+        buzzer_rfid_flag = true;
 
         String content = "";
         for (byte i = 0; i < obj_rc522.uid.size; i++) {
             content.concat(String(obj_rc522.uid.uidByte[i], HEX));
         }
         content.toUpperCase();
-        card_uid = content;
-        timer2   = cur_millis + 5000;
+
+        switch (cur_mode) {
+        case AUTO_MODE: {
+            switch (cur_page) {
+            case 2:
+                break;
+            default:
+                break;
+            }
+            // All page functions in automatic mode are implemented here
+            detect_rfid_id    = content;
+            show_rfid_timeout = millis() + 5000;
+        } break;
+        case SET_MODE:
+            detect_rfid_id = content;
+            strcpy(config.rfid_uid, content.c_str());
+            /* write EEPROM */
+            EEPROM.put(EEPROM_ADDR, config);
+            break;
+        default:
+            break;
+        }
     }
 }
 
 void Task_WS2812(void)
 {
     static uint32_t timer = 0;
+    // static bool     show_rfid_ws2812 = false;
 
-    if (m_uKeyCode_JoyX_L == _KEYCODE_F_EDGE) {
-        ws2812SetShow(JOY_LEFT, WS2812_WHITE);
-    } else if (m_uKeyCode_JoyX_R == _KEYCODE_F_EDGE) {
-        ws2812SetShow(JOY_RIGHT, WS2812_WHITE);
-    } else if (m_uKeyCode_JoyY_U == _KEYCODE_F_EDGE) {
-        ws2812SetShow(JOY_UP, WS2812_WHITE);
-    } else if (m_uKeyCode_JoyY_D == _KEYCODE_F_EDGE) {
-        ws2812SetShow(JOY_DOWN, WS2812_WHITE);
-    }
-    if (m_uKeyCode_JoyX_L == _KEYCODE_R_EDGE || m_uKeyCode_JoyX_R == _KEYCODE_R_EDGE || m_uKeyCode_JoyY_U == _KEYCODE_R_EDGE || m_uKeyCode_JoyY_D == _KEYCODE_R_EDGE) {
+    if (m_KeyPolling_JoyX_L_Tag.bPressKey) {
+        ws2812SetShow(WS2812_LEFT, WS2812_WHITE);
+    } else if (m_KeyPolling_JoyX_R_Tag.bPressKey) {
+        ws2812SetShow(WS2812_RIGHT, WS2812_WHITE);
+    } else if (m_KeyPolling_JoyY_U_Tag.bPressKey) {
+        ws2812SetShow(WS2812_UP, WS2812_WHITE);
+    } else if (m_KeyPolling_JoyY_D_Tag.bPressKey) {
+        ws2812SetShow(WS2812_DOWN, WS2812_WHITE);
+    } else if (m_KeyPolling_JoyBtn_Tag.bPressKey) {
+        ws2812SetShow(WS2812_ALL, WS2812_WHITE);
+    } else if (detect_rfid_id != ID_NULL) {
+        if (strcmp(config.rfid_uid, detect_rfid_id.c_str()) == 0) {
+            ws2812SetShow(WS2812_ALL, WS2812_GREEN);
+        } else if (strcmp(config.rfid_uid, detect_rfid_id.c_str()) != 0) {
+            ws2812SetShow(WS2812_ALL, WS2812_RED);
+        }
+    } else {
         obj_ws2812.clear();
         obj_ws2812.show();
     }
@@ -243,15 +345,30 @@ void Task_WS2812(void)
     }
 }
 
-void ws2812SetShow(uint16_t idx, uint32_t color)
+void ws2812SetShow(uint16_t ws2812_mode, uint32_t color)
 {
-    obj_ws2812.setPixelColor(idx, color);
+    switch (ws2812_mode) {
+    case WS2812_LEFT:
+    case WS2812_DOWN:
+    case WS2812_RIGHT:
+    case WS2812_UP:
+        obj_ws2812.clear();
+        obj_ws2812.setPixelColor(ws2812_mode, color);
+        break;
+    case WS2812_ALL:
+        for (uint8_t i = 0; i < NUMPIXELS; i++) {
+            obj_ws2812.setPixelColor(i, color);
+        }
+        break;
+    default:
+        break;
+    }
     obj_ws2812.show();
 }
 
 void Task_Buzzer(void)
 {
-    static uint32_t timer = 0;
+    static uint32_t timer = 0, timer2 = 0;
     if (m_uKeyCode_Pir == _KEYCODE_F_EDGE) {
         tone(BUZZER_PIN, BUZZER_Si);
         timer = millis() + 2000;
@@ -265,6 +382,22 @@ void Task_Buzzer(void)
     } else if (m_uKeyCode_Fire == _KEYCODE_R_EDGE || millis() > timer) {
         noTone(BUZZER_PIN);
     }
+
+    if (buzzer_rfid_flag) {
+        buzzer_rfid_flag = false;
+        tone(BUZZER_PIN, BUZZER_Fa);
+        timer = millis() + 100;
+    }
+}
+
+void change_mode(uint8_t new_mode)
+{
+    if (new_mode >= MAX_MODE) {
+        DEBUG_PRINTLN(F("out of mode range!"));
+        return;
+    }
+    cur_page = 1;
+    cur_mode = new_mode;
 }
 
 //--------------------------------------------------------
@@ -408,10 +541,10 @@ void hardwareDebug(void)
 
 #if HARDWARE_DEBUG_RFID
     // Debug RFID
-    Task_GetRFIDUID();
-    if (card_uid != ID_NULL) {
+    Task_RFID();
+    if (detect_rfid_id != ID_NULL) {
         M_DEBUG_PRINT(F("UID tag :"));
-        M_DEBUG_PRINTLN(card_uid);
+        M_DEBUG_PRINTLN(detect_rfid_id);
     }
 #endif
 }
