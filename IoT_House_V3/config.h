@@ -1,6 +1,8 @@
 #ifndef _CONFIG_H
 #define _CONFIG_H
 
+#define VERSION 3.0
+
 #define HARDWARE_DEBUG false
 #define HARDWARE_DEBUG_SENSOR true
 #define HARDWARE_DEBUG_BUZZER true

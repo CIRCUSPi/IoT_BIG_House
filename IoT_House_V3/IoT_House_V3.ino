@@ -2,6 +2,7 @@
 #include <Adafruit_NeoPixel.h>
 #include <DHT.h>
 #include <EEPROM.h>
+#include <LRemote.h>
 #include <LiquidCrystal_I2C.h>
 #include <MFRC522.h>
 #include <SPI.h>
@@ -26,9 +27,12 @@ bool     m_fire         = 0;
 String   detect_rfid_id = ID_NULL;
 /* #endregion */
 
+/* #region  Page and mode */
 uint8_t cur_page = 1;
 uint8_t cur_mode = AUTO_MODE;
+/* #endregion */
 
+/* #region  Key polling struct */
 struct KEY_POLLING_STRUCT m_KeyPolling_JoyX_L_Tag;
 struct KEY_POLLING_STRUCT m_KeyPolling_JoyX_R_Tag;
 struct KEY_POLLING_STRUCT m_KeyPolling_JoyY_U_Tag;
@@ -36,7 +40,9 @@ struct KEY_POLLING_STRUCT m_KeyPolling_JoyY_D_Tag;
 struct KEY_POLLING_STRUCT m_KeyPolling_JoyBtn_Tag;
 struct KEY_POLLING_STRUCT m_KeyPolling_Pir_Tag;
 struct KEY_POLLING_STRUCT m_KeyPolling_Fire_Tag;
+/* #endregion */
 
+/* #region  Key polling state */
 byte m_uKeyCode_JoyX_L;
 byte m_uKeyCode_JoyX_R;
 byte m_uKeyCode_JoyY_U;
@@ -44,16 +50,37 @@ byte m_uKeyCode_JoyY_D;
 byte m_uKeyCode_JoyBtn;
 byte m_uKeyCode_Pir;
 byte m_uKeyCode_Fire;
+/* #endregion */
 
+/* #region  system mode struct */
 sys_modes_t sys_modes[3] = {
      {.mode_tag = 'A', .page_max = AUTO_MODE_PAGE_MAX  },
      {.mode_tag = 'M', .page_max = MANUAL_MODE_PAGE_MAX},
      {.mode_tag = 'S', .page_max = SET_MODE_PAGE_MAX   }
 };
+/* #endregion */
 
+// device config
 config_E config;
+
+/* #region  other variable */
 uint32_t show_rfid_timeout = 0;
 bool     buzzer_rfid_flag  = 0;
+/* #endregion */
+
+/* #region  LRemote object */
+LRemoteSlider LRSlider_LED_R;
+LRemoteSlider LRSlider_LED_G;
+LRemoteSlider LRSlider_LED_B;
+LRemoteSlider LRSlider_LED_Brightness;
+LRemoteSwitch LRSwitch_Buzzer;
+LRemoteLabel  LRLable_Temp;
+LRemoteLabel  LRLable_Humi;
+LRemoteLabel  LRLable_Pir;
+LRemoteLabel  LRLable_Light;
+LRemoteLabel  LRLable_Fire;
+LRemoteLabel  LRLable_RFID;
+/* #endregion */
 
 void setup()
 {
@@ -87,6 +114,8 @@ void setup()
     Init_Polling_Button(0, &m_KeyPolling_JoyBtn_Tag);
     Init_Polling_Button(0, &m_KeyPolling_Pir_Tag);
     Init_Polling_Button(0, &m_KeyPolling_Fire_Tag);
+
+    LRemoteSetting();
 }
 
 void loop()
@@ -94,13 +123,13 @@ void loop()
 #if HARDWARE_DEBUG
     hardwareDebug();
 #else
-    // Get Sensor Data
     Task_ReadSensorData();
     Task_RFID();
     Task_LCD();
     Task_Joystick();
     Task_WS2812();
     Task_Buzzer();
+    Task_LRemote();
 #endif
 }
 
@@ -120,7 +149,7 @@ void Task_LCD(void)
         timer         = millis() + 150;
         char buff[20] = {0};
 
-        sprintf(buff, "   %s  %c", "IoT House V3.0", sys_modes[cur_mode].mode_tag);
+        sprintf(buff, "   IoT House V%.1f  %c", VERSION, sys_modes[cur_mode].mode_tag);
         lcd_print(0, 0, buff);
         switch (cur_mode) {
         case AUTO_MODE: {
@@ -154,6 +183,7 @@ void Task_LCD(void)
             default:
                 break;
             }
+            lcd_print(0, 2, (char *)" Open Linkit Remote ");
         } break;
         case SET_MODE: {
             switch (cur_page) {
@@ -205,7 +235,7 @@ void Task_Joystick()
                 cur_page++;
             }
             if (m_uKeyCode_JoyBtn == _KEYCODE_F_EDGE) {
-                change_mode(SET_MODE);
+                next_mode();
             }
         } break;
         default:
@@ -213,17 +243,14 @@ void Task_Joystick()
         }
     } break;
     case MANUAL_MODE: {
-        switch (cur_page) {
-        case 1: {
-        } break;
-        default:
-            break;
+        if (m_uKeyCode_JoyBtn == _KEYCODE_F_EDGE) {
+            next_mode();
         }
     } break;
     case SET_MODE: {
         switch (cur_page) {
         case 1: {
-            if (m_uKeyCode_JoyBtn == _KEYCODE_F_EDGE) {
+            if (m_KeyPolling_JoyBtn_Tag.uRepeatCount >= 3) {
                 change_mode(AUTO_MODE);
             }
         } break;
@@ -289,16 +316,10 @@ void Task_RFID(void)
 
         switch (cur_mode) {
         case AUTO_MODE: {
-            switch (cur_page) {
-            case 2:
-                break;
-            default:
-                break;
-            }
-            // All page functions in automatic mode are implemented here
+        case MANUAL_MODE:
             detect_rfid_id    = content;
             show_rfid_timeout = millis() + 5000;
-        } break;
+            break;
         case SET_MODE:
             detect_rfid_id = content;
             strcpy(config.rfid_uid, content.c_str());
@@ -308,13 +329,13 @@ void Task_RFID(void)
         default:
             break;
         }
+        }
     }
 }
 
 void Task_WS2812(void)
 {
     static uint32_t timer = 0;
-    // static bool     show_rfid_ws2812 = false;
 
     if (m_KeyPolling_JoyX_L_Tag.bPressKey) {
         ws2812SetShow(WS2812_LEFT, WS2812_WHITE);
@@ -368,7 +389,7 @@ void ws2812SetShow(uint16_t ws2812_mode, uint32_t color)
 
 void Task_Buzzer(void)
 {
-    static uint32_t timer = 0, timer2 = 0;
+    static uint32_t timer = 0;
     if (m_uKeyCode_Pir == _KEYCODE_F_EDGE) {
         tone(BUZZER_PIN, BUZZER_Si);
         timer = millis() + 2000;
@@ -390,6 +411,32 @@ void Task_Buzzer(void)
     }
 }
 
+void Task_LRemote(void)
+{
+    static uint32_t timer = 0;
+
+    if (millis() > timer) {
+        timer = millis() + 200;
+        LRemote.process();
+        switch (cur_mode) {
+        case AUTO_MODE: {
+        } break;
+        case MANUAL_MODE: {
+            LRLable_Temp.updateText(String(m_temperature));
+            LRLable_Humi.updateText(String(m_humidity));
+            LRLable_Pir.updateText(String(m_pir));
+            LRLable_Fire.updateText(String(m_fire));
+            LRLable_Light.updateText(String(m_light_raw));
+            LRLable_RFID.updateText(detect_rfid_id);
+        } break;
+        case SET_MODE: {
+        } break;
+        default:
+            break;
+        }
+    }
+}
+
 void change_mode(uint8_t new_mode)
 {
     if (new_mode >= MAX_MODE) {
@@ -398,6 +445,15 @@ void change_mode(uint8_t new_mode)
     }
     cur_page = 1;
     cur_mode = new_mode;
+}
+
+void next_mode(void)
+{
+    cur_mode++;
+    if (cur_mode >= MAX_MODE) {
+        cur_mode = 0;
+    }
+    cur_page = 1;
 }
 
 //--------------------------------------------------------
@@ -462,6 +518,82 @@ void Init_Polling_Button(byte uActiveLevel, struct KEY_POLLING_STRUCT *pTag)
 {
     FillBytes((byte *)pTag, 0x00, sizeof(KEY_POLLING_STRUCT));
     pTag->uActiveLevel = uActiveLevel;
+}
+
+void LRemoteSetting(void)
+{
+    char buff[16] = {0};
+    sprintf(buff, "IoT House V%.1f", VERSION);
+    LRemote.setName(buff);
+    LRemote.setOrientation(RC_PORTRAIT);
+    LRemote.setGrid(2, 8);
+
+    LRLable_Temp.setPos(0, 0);
+    LRLable_Temp.setSize(1, 1);
+    LRLable_Temp.setText(String("Temperature"));
+
+    LRLable_Humi.setPos(1, 0);
+    LRLable_Humi.setSize(1, 1);
+    LRLable_Humi.setText(String("Humidity"));
+
+    LRLable_Pir.setPos(0, 1);
+    LRLable_Pir.setSize(1, 1);
+    LRLable_Pir.setText(String("Pir"));
+
+    LRLable_Fire.setPos(1, 1);
+    LRLable_Fire.setSize(1, 1);
+    LRLable_Fire.setText(String("Fire"));
+
+    LRLable_Light.setPos(0, 2);
+    LRLable_Light.setSize(1, 1);
+    LRLable_Light.setText(String("Light"));
+
+    LRLable_RFID.setPos(1, 2);
+    LRLable_RFID.setSize(1, 1);
+    LRLable_RFID.setText(String("RFID"));
+
+    LRSlider_LED_R.setPos(0, 3);
+    LRSlider_LED_R.setSize(2, 1);
+    LRSlider_LED_R.setText(String("LED R"));
+    LRSlider_LED_R.setColor(RC_PINK);
+    LRSlider_LED_R.setValueRange(0, 255, 100);
+
+    LRSlider_LED_G.setPos(0, 4);
+    LRSlider_LED_G.setSize(2, 1);
+    LRSlider_LED_G.setText(String("LED G"));
+    LRSlider_LED_G.setColor(RC_GREEN);
+    LRSlider_LED_G.setValueRange(0, 255, 100);
+
+    LRSlider_LED_B.setPos(0, 5);
+    LRSlider_LED_B.setSize(2, 1);
+    LRSlider_LED_B.setText(String("LED B"));
+    LRSlider_LED_B.setColor(RC_BLUE);
+    LRSlider_LED_B.setValueRange(0, 255, 100);
+
+    LRSlider_LED_Brightness.setPos(0, 6);
+    LRSlider_LED_Brightness.setSize(2, 1);
+    LRSlider_LED_Brightness.setText(String("LED Brightness"));
+    LRSlider_LED_Brightness.setColor(RC_YELLOW);
+    LRSlider_LED_Brightness.setValueRange(0, 255, 30);
+
+    LRSwitch_Buzzer.setPos(0, 7);
+    LRSwitch_Buzzer.setSize(1, 1);
+    LRSwitch_Buzzer.setText(String("Buzzer"));
+    LRSwitch_Buzzer.setColor(RC_ORANGE);
+
+    LRemote.addControl(LRLable_Temp);
+    LRemote.addControl(LRLable_Humi);
+    LRemote.addControl(LRLable_Pir);
+    LRemote.addControl(LRLable_Fire);
+    LRemote.addControl(LRLable_Light);
+    LRemote.addControl(LRLable_RFID);
+    LRemote.addControl(LRSlider_LED_R);
+    LRemote.addControl(LRSlider_LED_G);
+    LRemote.addControl(LRSlider_LED_B);
+    LRemote.addControl(LRSlider_LED_Brightness);
+    LRemote.addControl(LRSwitch_Buzzer);
+
+    LRemote.begin();
 }
 
 #if HARDWARE_DEBUG
