@@ -56,6 +56,7 @@
 #define WS2812_RED 0xFF0000
 #define WS2812_GREEN 0x00FF00
 #define WS2812_BLUE 0x0000FF
+#define WS2812_BLACK 0x0
 
 #define BUZZER_Do 523
 #define BUZZER_Re 587
