@@ -118,6 +118,7 @@ void setup()
     Init_Polling_Button(0, &m_KeyPolling_Fire_Tag);
 
     LRemoteSetting();
+    delay(1000);
 }
 
 void loop()
@@ -126,13 +127,63 @@ void loop()
     hardwareDebug();
 #else
     Task_ReadSensorData();
+    Task_Joystick();
     Task_RFID();
     Task_LCD();
-    Task_Joystick();
     Task_WS2812();
     Task_Buzzer();
     Task_LRemote();
+    Task_Mode();
 #endif
+}
+
+void Task_Mode(void)
+{
+    switch (cur_mode) {
+    case AUTO_MODE: {
+        switch (cur_page) {
+        case 1:
+        case 2: {
+            if (m_uKeyCode_JoyX_L == _KEYCODE_F_EDGE) {
+                cur_page--;
+            }
+            if (m_uKeyCode_JoyX_R == _KEYCODE_F_EDGE) {
+                cur_page++;
+            }
+            if (m_uKeyCode_JoyBtn == _KEYCODE_F_EDGE) {
+                next_mode();
+            }
+        } break;
+        default:
+            break;
+        }
+    } break;
+    case MANUAL_MODE: {
+        if (m_uKeyCode_JoyBtn == _KEYCODE_F_EDGE) {
+            next_mode();
+        }
+    } break;
+    case SET_MODE: {
+        switch (cur_page) {
+        case 1: {
+            if (m_uKeyCode_JoyBtn == _KEYCODE_REPEAT && m_KeyPolling_JoyBtn_Tag.uRepeatCount >= 3) {
+                change_mode(AUTO_MODE);
+            }
+        } break;
+        default:
+            break;
+        }
+    } break;
+    default:
+        break;
+    }
+
+    // check page range
+    if (cur_page > sys_modes[cur_mode].page_max) {
+        cur_page = sys_modes[cur_mode].page_max;
+    } else if (cur_page < 1) {
+        cur_page = 1;
+    }
 }
 
 void Task_LCD(void)
@@ -180,12 +231,6 @@ void Task_LCD(void)
             }
         } break;
         case MANUAL_MODE: {
-            switch (cur_page) {
-            case 1: {
-            } break;
-            default:
-                break;
-            }
             lcd_print(0, 2, (char *)" Open Linkit Remote ");
         } break;
         case SET_MODE: {
@@ -208,12 +253,6 @@ void Task_LCD(void)
     }
 }
 
-void lcd_print(uint8_t col, uint8_t row, char *data)
-{
-    obj_lcd.setCursor(col, row);
-    obj_lcd.print(data);
-}
-
 void Task_Joystick()
 {
     // default pullup
@@ -228,52 +267,6 @@ void Task_Joystick()
     m_uKeyCode_JoyY_U = Polling_Button_Repeat(&m_KeyPolling_JoyY_U_Tag);
     m_uKeyCode_JoyY_D = Polling_Button_Repeat(&m_KeyPolling_JoyY_D_Tag);
     m_uKeyCode_JoyBtn = Polling_Button_Repeat(&m_KeyPolling_JoyBtn_Tag);
-
-    switch (cur_mode) {
-    case AUTO_MODE: {
-        switch (cur_page) {
-        case 1:
-        case 2: {
-            if (m_uKeyCode_JoyX_L == _KEYCODE_F_EDGE) {
-                cur_page--;
-            }
-            if (m_uKeyCode_JoyX_R == _KEYCODE_F_EDGE) {
-                cur_page++;
-            }
-            if (m_uKeyCode_JoyBtn == _KEYCODE_F_EDGE) {
-                next_mode();
-            }
-        } break;
-        default:
-            break;
-        }
-    } break;
-    case MANUAL_MODE: {
-        if (m_uKeyCode_JoyBtn == _KEYCODE_F_EDGE) {
-            next_mode();
-        }
-    } break;
-    case SET_MODE: {
-        switch (cur_page) {
-        case 1: {
-            if (m_uKeyCode_JoyBtn == _KEYCODE_REPEAT && m_KeyPolling_JoyBtn_Tag.uRepeatCount >= 3) {
-                change_mode(AUTO_MODE);
-            }
-        } break;
-        default:
-            break;
-        }
-    } break;
-    default:
-        break;
-    }
-
-    // check page range
-    if (cur_page > sys_modes[cur_mode].page_max) {
-        cur_page = sys_modes[cur_mode].page_max;
-    } else if (cur_page < 1) {
-        cur_page = 1;
-    }
 }
 
 void Task_ReadSensorData(void)
@@ -329,8 +322,8 @@ void Task_RFID(void)
             break;
         case SET_MODE:
             detect_rfid_id = content;
-            strcpy(config.rfid_uid, content.c_str());
             /* write EEPROM */
+            strcpy(config.rfid_uid, content.c_str());
             EEPROM.put(EEPROM_ADDR, config);
             break;
         default:
@@ -344,54 +337,181 @@ void Task_WS2812(void)
 {
     static uint32_t timer         = 0;
     static bool     pre_rfid_flag = false;
+    static uint8_t  pre_mode      = 0;
 
-    uint32_t cur_millis;
-    bool     colse_flag = false, rfid_flag = false;
-
-    if (m_uKeyCode_JoyX_L == _KEYCODE_F_EDGE) {
-        ws2812SetShow(WS2812_LEFT, WS2812_WHITE);
-    } else if (m_uKeyCode_JoyX_R == _KEYCODE_F_EDGE) {
-        ws2812SetShow(WS2812_RIGHT, WS2812_WHITE);
-    } else if (m_uKeyCode_JoyY_U == _KEYCODE_F_EDGE) {
-        ws2812SetShow(WS2812_UP, WS2812_WHITE);
-    } else if (m_uKeyCode_JoyY_D == _KEYCODE_F_EDGE) {
-        ws2812SetShow(WS2812_DOWN, WS2812_WHITE);
-    } else if (m_uKeyCode_JoyBtn == _KEYCODE_F_EDGE) {
-        ws2812SetShow(WS2812_ALL, WS2812_WHITE);
-    }
-    if (millis() < rfid_detect_time + 5000) {
-        if (rfid_detect_flag) {
-            rfid_flag = false;
-            if (strcmp(config.rfid_uid, detect_rfid_id.c_str()) == 0) {
-                ws2812SetShow(WS2812_ALL, WS2812_GREEN);
-            } else if (strcmp(config.rfid_uid, detect_rfid_id.c_str()) != 0) {
-                ws2812SetShow(WS2812_ALL, WS2812_RED);
-            }
-        }
-    } else {
-        rfid_flag = true;
-    }
-
-    colse_flag |= (m_uKeyCode_JoyX_L == _KEYCODE_R_EDGE);
-    colse_flag |= (m_uKeyCode_JoyX_R == _KEYCODE_R_EDGE);
-    colse_flag |= (m_uKeyCode_JoyY_U == _KEYCODE_R_EDGE);
-    colse_flag |= (m_uKeyCode_JoyY_D == _KEYCODE_R_EDGE);
-    colse_flag |= (m_uKeyCode_JoyBtn == _KEYCODE_R_EDGE);
-    if (pre_rfid_flag != rfid_flag) {
-        pre_rfid_flag = rfid_flag;
-        colse_flag |= rfid_flag;
-    }
-
-    if (colse_flag) {
+    if (pre_mode != cur_mode) {
+        pre_mode = cur_mode;
         ws2812SetShow(WS2812_ALL, WS2812_BLACK);
     }
 
-    cur_millis = millis();
-    if (cur_millis > timer) {
-        timer                  = cur_millis + 200;
-        uint8_t brightness_x10 = map(m_light_raw, 0, 3500, 1, 10);
+    switch (cur_mode) {
+    case AUTO_MODE:
+    case SET_MODE: {
+        uint32_t cur_millis;
+        bool     colse_flag = false, rfid_flag = false;
+
+        if (m_uKeyCode_JoyX_L == _KEYCODE_F_EDGE) {
+            ws2812SetShow(WS2812_LEFT, WS2812_WHITE);
+        } else if (m_uKeyCode_JoyX_R == _KEYCODE_F_EDGE) {
+            ws2812SetShow(WS2812_RIGHT, WS2812_WHITE);
+        } else if (m_uKeyCode_JoyY_U == _KEYCODE_F_EDGE) {
+            ws2812SetShow(WS2812_UP, WS2812_WHITE);
+        } else if (m_uKeyCode_JoyY_D == _KEYCODE_F_EDGE) {
+            ws2812SetShow(WS2812_DOWN, WS2812_WHITE);
+        } else if (m_uKeyCode_JoyBtn == _KEYCODE_F_EDGE) {
+            ws2812SetShow(WS2812_ALL, WS2812_WHITE);
+        }
+
+        if (millis() < rfid_detect_time + 5000) {
+            if (rfid_detect_flag) {
+                rfid_flag = false;
+                if (strcmp(config.rfid_uid, detect_rfid_id.c_str()) == 0) {
+                    ws2812SetShow(WS2812_ALL, WS2812_GREEN);
+                } else if (strcmp(config.rfid_uid, detect_rfid_id.c_str()) != 0) {
+                    ws2812SetShow(WS2812_ALL, WS2812_RED);
+                }
+            }
+        } else {
+            rfid_flag = true;
+        }
+
+        colse_flag |= (m_uKeyCode_JoyX_L == _KEYCODE_R_EDGE);
+        colse_flag |= (m_uKeyCode_JoyX_R == _KEYCODE_R_EDGE);
+        colse_flag |= (m_uKeyCode_JoyY_U == _KEYCODE_R_EDGE);
+        colse_flag |= (m_uKeyCode_JoyY_D == _KEYCODE_R_EDGE);
+        colse_flag |= (m_uKeyCode_JoyBtn == _KEYCODE_R_EDGE);
+
+        if (pre_rfid_flag != rfid_flag) {
+            pre_rfid_flag = rfid_flag;
+            colse_flag |= rfid_flag;
+        }
+
+        if (colse_flag) {
+            ws2812SetShow(WS2812_ALL, WS2812_BLACK);
+        }
+
+        cur_millis = millis();
+        if (cur_millis > timer) {
+            timer                  = cur_millis + 200;
+            uint8_t brightness_x10 = map(m_light_raw, 0, 3500, 1, 10);
+            ws2812_brightness      = brightness_x10 * 0.1;
+        }
+    } break;
+    case MANUAL_MODE: {
+        uint8_t r              = (uint8_t)LRSlider_LED_R.getValue();
+        uint8_t g              = (uint8_t)LRSlider_LED_G.getValue();
+        uint8_t b              = (uint8_t)LRSlider_LED_B.getValue();
+        uint8_t brightness_x10 = (uint8_t)LRSlider_LED_Brightness.getValue();
         ws2812_brightness      = brightness_x10 * 0.1;
+        ws2812SetShow(WS2812_ALL, r, g, b);
+    } break;
+    default:
+        break;
     }
+}
+
+void Task_Buzzer(void)
+{
+    static uint32_t timer = 0;
+
+    switch (cur_mode) {
+    case AUTO_MODE: {
+        if (m_uKeyCode_Pir == _KEYCODE_F_EDGE) {
+            tone(BUZZER_PIN, BUZZER_Si);
+            timer = millis() + 1000;
+        } else if (m_uKeyCode_Pir == _KEYCODE_R_EDGE) {
+            noTone(BUZZER_PIN);
+        }
+
+        if (m_uKeyCode_Fire == _KEYCODE_F_EDGE) {
+            tone(BUZZER_PIN, BUZZER_Do);
+            timer = millis() + 1000;
+        } else if (m_uKeyCode_Fire == _KEYCODE_R_EDGE) {
+            noTone(BUZZER_PIN);
+        }
+
+        if (rfid_detect_flag || m_uKeyCode_JoyBtn == _KEYCODE_F_EDGE) {
+            tone(BUZZER_PIN, BUZZER_Fa);
+            timer = millis() + 100;
+        }
+
+        if (m_uKeyCode_JoyBtn == _KEYCODE_REPEAT && m_KeyPolling_JoyBtn_Tag.uRepeatCount >= 3) {
+            tone(BUZZER_PIN, BUZZER_La);
+            timer = millis() + 100;
+        }
+    } break;
+    case MANUAL_MODE: {
+        if (rfid_detect_flag || m_uKeyCode_JoyBtn == _KEYCODE_F_EDGE) {
+            tone(BUZZER_PIN, BUZZER_Fa);
+            timer = millis() + 100;
+        }
+
+        if (m_uKeyCode_JoyBtn == _KEYCODE_REPEAT && m_KeyPolling_JoyBtn_Tag.uRepeatCount >= 3) {
+            tone(BUZZER_PIN, BUZZER_La);
+            timer = millis() + 100;
+        }
+        bool btn_state = (bool)LRSwitch_Buzzer.getValue();
+        if (btn_state) {
+            tone(BUZZER_PIN, BUZZER_Si);
+            timer = millis() + 200;
+        }
+    } break;
+    case SET_MODE: {
+        if (rfid_detect_flag || m_uKeyCode_JoyBtn == _KEYCODE_F_EDGE) {
+            tone(BUZZER_PIN, BUZZER_Fa);
+            timer = millis() + 100;
+        }
+
+        if (m_uKeyCode_JoyBtn == _KEYCODE_REPEAT && m_KeyPolling_JoyBtn_Tag.uRepeatCount >= 3) {
+            tone(BUZZER_PIN, BUZZER_La);
+            timer = millis() + 100;
+        }
+    } break;
+    default:
+        break;
+    }
+
+    if (millis() > timer) {
+        noTone(BUZZER_PIN);
+    }
+}
+
+void Task_LRemote(void)
+{
+    static uint32_t timer = 0;
+
+    if (millis() > timer) {
+        timer = millis() + 200;
+        LRemote.process();
+        switch (cur_mode) {
+        case AUTO_MODE: {
+        } break;
+        case MANUAL_MODE: {
+            LRLable_Temp.updateText("T:" + String(m_temperature));
+            LRLable_Humi.updateText("H:" + String(m_humidity));
+            LRLable_Pir.updateText("P:" + String(m_pir));
+            LRLable_Fire.updateText("F:" + String(m_fire));
+            LRLable_Light.updateText("L:" + String(m_light_raw));
+            LRLable_RFID.updateText("R:" + detect_rfid_id);
+        } break;
+        case SET_MODE: {
+        } break;
+        default:
+            break;
+        }
+    }
+}
+
+void lcd_print(uint8_t col, uint8_t row, char *data)
+{
+    obj_lcd.setCursor(col, row);
+    obj_lcd.print(data);
+}
+
+void ws2812SetShow(uint16_t ws2812_mode, uint8_t r, uint8_t g, uint8_t b)
+{
+    uint32_t color = obj_ws2812.Color(r, g, b);
+    ws2812SetShow(ws2812_mode, color);
 }
 
 void ws2812SetShow(uint16_t ws2812_mode, uint32_t color)
@@ -424,60 +544,7 @@ void ws2812SetShow(uint16_t ws2812_mode, uint32_t color)
         break;
     }
     obj_ws2812.show();
-}
-
-void Task_Buzzer(void)
-{
-    static uint32_t timer = 0;
-    if (m_uKeyCode_Pir == _KEYCODE_F_EDGE) {
-        tone(BUZZER_PIN, BUZZER_Si);
-        timer = millis() + 1000;
-    } else if (m_uKeyCode_Pir == _KEYCODE_R_EDGE || millis() > timer) {
-        noTone(BUZZER_PIN);
-    }
-
-    if (m_uKeyCode_Fire == _KEYCODE_F_EDGE) {
-        tone(BUZZER_PIN, BUZZER_Do);
-        timer = millis() + 1000;
-    } else if (m_uKeyCode_Fire == _KEYCODE_R_EDGE || millis() > timer) {
-        noTone(BUZZER_PIN);
-    }
-
-    if (rfid_detect_flag || m_uKeyCode_JoyBtn == _KEYCODE_F_EDGE) {
-        tone(BUZZER_PIN, BUZZER_Fa);
-        timer = millis() + 100;
-    }
-
-    if (m_uKeyCode_JoyBtn == _KEYCODE_REPEAT && m_KeyPolling_JoyBtn_Tag.uRepeatCount >= 3) {
-        tone(BUZZER_PIN, BUZZER_La);
-        timer = millis() + 100;
-    }
-}
-
-void Task_LRemote(void)
-{
-    static uint32_t timer = 0;
-
-    if (millis() > timer) {
-        timer = millis() + 200;
-        LRemote.process();
-        switch (cur_mode) {
-        case AUTO_MODE: {
-        } break;
-        case MANUAL_MODE: {
-            LRLable_Temp.updateText("T:" + String(m_temperature));
-            LRLable_Humi.updateText("H:" + String(m_humidity));
-            LRLable_Pir.updateText("P:" + String(m_pir));
-            LRLable_Fire.updateText("F:" + String(m_fire));
-            LRLable_Light.updateText("L:" + String(m_light_raw));
-            LRLable_RFID.updateText("R:" + detect_rfid_id);
-        } break;
-        case SET_MODE: {
-        } break;
-        default:
-            break;
-        }
-    }
+    obj_ws2812.show();
 }
 
 void change_mode(uint8_t new_mode)
@@ -599,25 +666,25 @@ void LRemoteSetting(void)
     LRSlider_LED_R.setSize(2, 1);
     LRSlider_LED_R.setText(String("LED R"));
     LRSlider_LED_R.setColor(RC_PINK);
-    LRSlider_LED_R.setValueRange(0, 255, 100);
+    LRSlider_LED_R.setValueRange(0, 255, 0);
 
     LRSlider_LED_G.setPos(0, 4);
     LRSlider_LED_G.setSize(2, 1);
     LRSlider_LED_G.setText(String("LED G"));
     LRSlider_LED_G.setColor(RC_GREEN);
-    LRSlider_LED_G.setValueRange(0, 255, 100);
+    LRSlider_LED_G.setValueRange(0, 255, 0);
 
     LRSlider_LED_B.setPos(0, 5);
     LRSlider_LED_B.setSize(2, 1);
     LRSlider_LED_B.setText(String("LED B"));
     LRSlider_LED_B.setColor(RC_BLUE);
-    LRSlider_LED_B.setValueRange(0, 255, 100);
+    LRSlider_LED_B.setValueRange(0, 255, 0);
 
     LRSlider_LED_Brightness.setPos(0, 6);
     LRSlider_LED_Brightness.setSize(2, 1);
     LRSlider_LED_Brightness.setText(String("LED Brightness"));
     LRSlider_LED_Brightness.setColor(RC_YELLOW);
-    LRSlider_LED_Brightness.setValueRange(0, 255, 30);
+    LRSlider_LED_Brightness.setValueRange(1, 10, 1);
 
     LRSwitch_Buzzer.setPos(0, 7);
     LRSwitch_Buzzer.setSize(1, 1);
