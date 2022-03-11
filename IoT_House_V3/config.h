@@ -19,6 +19,10 @@
 #define DEBUG_PRINT(x)
 #define DEBUG_PRINTLN(x)
 #endif
+
+#define CLI_PRINT(x) Serial.print(x)
+#define CLI_PRINTLN(x) Serial.println(x)
+
 // 7697  /  EZDIO
 #define DHT11_PIN 16           // IO2
 #define LIGHT_PIN 17           // IO3
@@ -39,7 +43,8 @@
 
 #define AUTO_MODE_PAGE_MAX 2
 #define MANUAL_MODE_PAGE_MAX 1
-#define SET_MODE_PAGE_MAX 1
+#define MQTT_MODE_PAGE_MAX 1
+#define SET_MODE_PAGE_MAX 2
 #define ID_NULL "--------"
 
 #define _TIME_KEY_POLLING_uS 50000UL
@@ -69,10 +74,16 @@
 /* EEPROM config Start Address */
 #define EEPROM_ADDR 0x0
 
+#define MQTT_BROKER "io.adafruit.com"
+#define MQTT_PORT 1883
+#define MQTT_ADAIO_KEEPALIVE 270000
+#define PUB_DATA_INTERVAL 120000
+
 typedef enum
 {
     AUTO_MODE,
     MANUAL_MODE,
+    MQTT_MODE,
     SET_MODE,
     MAX_MODE,
 } SYS_MODE_E;
@@ -86,6 +97,36 @@ typedef enum
     WS2812_ALL,
     WS2812_CLOSE,
 } WS2812_MODE_E;
+
+typedef enum
+{
+    WAIT_START,
+    WAIT_IN_WIFI_SSID,
+    WAIT_IN_WIFI_PASS,
+    WAIT_IN_MQTT_USER,
+    WAIT_IN_MQTT_PASS,
+    WAIT_IN_MQTT_ID,
+    WAIT_IN_TEMP_TOPIC,
+    WAIT_IN_HUMI_TOPIC,
+    WAIT_IN_LIGHT_TOPIC,
+    WAIT_IN_PIR_TOPIC,
+    WAIT_IN_WS2812_TOPIC,
+    WAIT_IN_RFID_TOPIC,
+    WAIT_IN_FIRE_TOPIC,
+    WAIT_IN_BUZZER_TOPIC,
+    IDLE,
+} CLI_STATE_E;
+
+typedef enum
+{
+    WIFI_BEGIN,
+    WIFI_WAIT,
+    MQTT_INIT,
+    MQTT_CONNECTING,
+    MQTT_READY,
+    MQTT_WAIT_10_S,
+    WIFI_WAIT_10_S,
+} MQTT_STATE_E;
 
 struct KEY_POLLING_STRUCT {
     uint32_t dwTimeSlot_Polling;
@@ -105,6 +146,7 @@ typedef struct {
     uint8_t page_max;
 } sys_modes_t;
 
+// MQTT use AdafruitIO
 typedef struct {
     char wifi_ssid[30];
     char wifi_pass[30];
@@ -112,6 +154,14 @@ typedef struct {
     char mqtt_user[30];
     char mqtt_pass[60];
     char device_id[30];
-} config_E;     // 188-byte
+    char temp_topic[50];
+    char humi_topic[50];
+    char Light_topic[50];
+    char pir_topic[50];
+    char ws2812_topic[50];
+    char rfid_topic[50];
+    char fire_topic[50];
+    char buzzer_topic[50];
+} config_E;     // n-byte
 
 #endif /* _CONFIG_H */

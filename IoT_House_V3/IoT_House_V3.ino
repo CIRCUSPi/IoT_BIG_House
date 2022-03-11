@@ -1,8 +1,10 @@
+#include "PubSubClient.h"
 #include "config.h"
 #include <Adafruit_NeoPixel.h>
 #include <DHT.h>
 #include <EEPROM.h>
 #include <LRemote.h>
+#include <LWiFi.h>
 #include <LiquidCrystal_I2C.h>
 #include <MFRC522.h>
 #include <SPI.h>
@@ -13,6 +15,8 @@ DHT               obj_dht11(DHT11_PIN, DHT11);
 Adafruit_NeoPixel obj_ws2812(NUMPIXELS, WS2812_PIN, NEO_GRB + NEO_KHZ800);
 MFRC522           obj_rc522(RFID_SS_PIN, 255);
 LiquidCrystal_I2C obj_lcd(LCD_I2C_ADDR);
+WiFiClient        obj_tcpClient;
+PubSubClient      obj_mqttClient = PubSubClient(obj_tcpClient);
 /* #endregion */
 
 /* #region  Sensor value */
@@ -53,9 +57,10 @@ byte m_uKeyCode_Fire;
 /* #endregion */
 
 /* #region  system mode struct */
-sys_modes_t sys_modes[3] = {
+sys_modes_t sys_modes[4] = {
      {.mode_tag = 'A', .page_max = AUTO_MODE_PAGE_MAX  },
      {.mode_tag = 'M', .page_max = MANUAL_MODE_PAGE_MAX},
+     {.mode_tag = 'Q', .page_max = MQTT_MODE_PAGE_MAX  },
      {.mode_tag = 'S', .page_max = SET_MODE_PAGE_MAX   }
 };
 /* #endregion */
@@ -68,6 +73,10 @@ bool rfid_detect_flag = 0;
 // range 0~1
 float    ws2812_brightness = 0.0f;
 uint32_t rfid_detect_time  = 0;
+uint8_t  adafruitio_state  = WIFI_BEGIN;
+bool     mqtt_ws2812_flag  = false;
+bool     mqtt_buzzer_flag  = false;
+uint32_t mqtt_ws2812_color = 0x00;
 /* #endregion */
 
 /* #region  LRemote object */
@@ -129,11 +138,13 @@ void loop()
     Task_ReadSensorData();
     Task_Joystick();
     Task_RFID();
-    Task_LCD();
     Task_WS2812();
     Task_Buzzer();
     Task_LRemote();
     Task_Mode();
+    Task_LCD();
+    Task_CLI_SetMode();
+    Task_AdafriotIO();
 #endif
 }
 
@@ -163,9 +174,21 @@ void Task_Mode(void)
             next_mode();
         }
     } break;
+    case MQTT_MODE: {
+        if (m_uKeyCode_JoyBtn == _KEYCODE_F_EDGE) {
+            next_mode();
+        }
+    } break;
     case SET_MODE: {
         switch (cur_page) {
-        case 1: {
+        case 1:
+        case 2: {
+            if (m_uKeyCode_JoyX_L == _KEYCODE_F_EDGE) {
+                cur_page--;
+            }
+            if (m_uKeyCode_JoyX_R == _KEYCODE_F_EDGE) {
+                cur_page++;
+            }
             if (m_uKeyCode_JoyBtn == _KEYCODE_REPEAT && m_KeyPolling_JoyBtn_Tag.uRepeatCount >= 3) {
                 change_mode(AUTO_MODE);
             }
@@ -233,12 +256,36 @@ void Task_LCD(void)
         case MANUAL_MODE: {
             lcd_print(0, 2, (char *)" Open Linkit Remote ");
         } break;
+        case MQTT_MODE: {
+            lcd_print(0, 1, (char *)"  Open AdafruitIO   ");
+            switch (adafruitio_state) {
+            case WIFI_BEGIN:
+                sprintf(buff, "Connect WiFi to %s", config.wifi_ssid);
+                lcd_print(0, 2, buff);
+                obj_lcd.clear();
+                break;
+            case MQTT_CONNECTING:
+                lcd_print(0, 2, (char *)"Connect AdafruitIO  ");
+                sprintf(buff, "Username: %s", config.mqtt_user);
+                lcd_print(0, 3, buff);
+                obj_lcd.clear();
+                break;
+            case MQTT_READY:
+                lcd_print(0, 2, (char *)"Connected AdafruitIO");
+                break;
+            default:
+                break;
+            }
+        } break;
         case SET_MODE: {
             switch (cur_page) {
             case 1: {
                 lcd_print(0, 1, (char *)"Input New RFID Card:");
                 sprintf(buff, "New Card :%8s", show_rfid.c_str());
                 lcd_print(0, 3, buff);
+            } break;
+            case 2: {
+                lcd_print(0, 2, (char *)"  Open Serial Port  ");
             } break;
             default:
                 break;
@@ -335,6 +382,8 @@ void Task_RFID(void)
 
 void Task_WS2812(void)
 {
+
+    // FIXME: WS2812第一顆燈有時會閃爍綠燈，懷疑是Linkit7697 Lib有問題，或是中斷導致
     static uint32_t timer         = 0;
     static bool     pre_rfid_flag = false;
     static uint8_t  pre_mode      = 0;
@@ -405,6 +454,13 @@ void Task_WS2812(void)
         ws2812_brightness      = brightness_x10 * 0.1;
         ws2812SetShow(WS2812_ALL, r, g, b);
     } break;
+    case MQTT_MODE: {
+        if (mqtt_ws2812_flag) {
+            mqtt_ws2812_flag  = false;
+            ws2812_brightness = 0.6;
+            ws2812SetShow(WS2812_ALL, mqtt_ws2812_color);
+        }
+    } break;
     default:
         break;
     }
@@ -467,6 +523,13 @@ void Task_Buzzer(void)
             timer = millis() + 100;
         }
     } break;
+    case MQTT_MODE: {
+        if (mqtt_buzzer_flag) {
+            tone(BUZZER_PIN, BUZZER_Si);
+        } else {
+            noTone(BUZZER_PIN);
+        }
+    } break;
     default:
         break;
     }
@@ -499,6 +562,299 @@ void Task_LRemote(void)
         default:
             break;
         }
+    }
+}
+
+void Task_CLI_SetMode(void)
+{
+    static uint8_t  state = WAIT_START;
+    static uint32_t timer = 0;
+
+    switch (cur_mode) {
+    case SET_MODE: {
+        switch (cur_page) {
+        case 2: {
+            switch (state) {
+            case WAIT_START:
+                if (millis() > timer) {
+                    timer = millis() + 1000;
+                    CLI_PRINTLN("0. Enter any character: ");
+                }
+                if (Serial.available()) {
+                    wait_Serial_clear();
+                    state = WAIT_IN_WIFI_SSID;
+                    CLI_PRINTLN("1. Enter WIFI SSID: ");
+                }
+                break;
+            case WAIT_IN_WIFI_SSID:
+                if (Serial.available()) {
+                    String ssid = Serial.readStringUntil('\r');
+                    strcpy(config.wifi_ssid, ssid.c_str());
+                    wait_Serial_clear();
+                    CLI_PRINT(">> WIFI SSID: ");
+                    CLI_PRINTLN(config.wifi_ssid);
+                    CLI_PRINTLN("2. Enter WIFI PASS: ");
+                    state = WAIT_IN_WIFI_PASS;
+                }
+                break;
+            case WAIT_IN_WIFI_PASS:
+                if (Serial.available()) {
+                    String pass = Serial.readStringUntil('\r');
+                    strcpy(config.wifi_pass, pass.c_str());
+                    wait_Serial_clear();
+                    CLI_PRINT(">> WIFI PASS: ");
+                    CLI_PRINTLN(config.wifi_pass);
+                    CLI_PRINTLN("3. Enter MQTT Username: ");
+                    state = WAIT_IN_MQTT_USER;
+                }
+                break;
+            case WAIT_IN_MQTT_USER:
+                if (Serial.available()) {
+                    String user = Serial.readStringUntil('\r');
+                    strcpy(config.mqtt_user, user.c_str());
+                    wait_Serial_clear();
+                    CLI_PRINT(">> AdafruitIO Username: ");
+                    CLI_PRINTLN(config.mqtt_user);
+                    CLI_PRINTLN("4. Enter MQTT Password: ");
+                    state = WAIT_IN_MQTT_PASS;
+                }
+                break;
+            case WAIT_IN_MQTT_PASS:
+                if (Serial.available()) {
+                    String pass = Serial.readStringUntil('\r');
+                    strcpy(config.mqtt_pass, pass.c_str());
+                    wait_Serial_clear();
+                    CLI_PRINT(">> AdafruitIO Password: ");
+                    CLI_PRINTLN(config.mqtt_pass);
+                    CLI_PRINTLN("5. Enter MQTT ID: ");
+                    state = WAIT_IN_MQTT_ID;
+                }
+                break;
+            case WAIT_IN_MQTT_ID:
+                if (Serial.available()) {
+                    String id = Serial.readStringUntil('\r');
+                    strcpy(config.device_id, id.c_str());
+                    wait_Serial_clear();
+                    CLI_PRINT(">> AdafruitIO MQTT ID: ");
+                    CLI_PRINTLN(config.device_id);
+                    CLI_PRINTLN("6. Enter Temperature Topic: ");
+                    state = WAIT_IN_TEMP_TOPIC;
+                }
+                break;
+            case WAIT_IN_TEMP_TOPIC:
+                if (Serial.available()) {
+                    String topic = Serial.readStringUntil('\r');
+                    strcpy(config.temp_topic, topic.c_str());
+                    wait_Serial_clear();
+                    CLI_PRINT(">> AdafruitIO Temperature Topic: ");
+                    CLI_PRINTLN(config.temp_topic);
+                    CLI_PRINTLN("7. Enter Humidity Topic: ");
+                    state = WAIT_IN_HUMI_TOPIC;
+                }
+                break;
+            case WAIT_IN_HUMI_TOPIC:
+                if (Serial.available()) {
+                    String topic = Serial.readStringUntil('\r');
+                    strcpy(config.humi_topic, topic.c_str());
+                    wait_Serial_clear();
+                    CLI_PRINT(">> AdafruitIO Humidity Topic: ");
+                    CLI_PRINTLN(config.humi_topic);
+                    CLI_PRINTLN("8. Enter Light Topic: ");
+                    state = WAIT_IN_LIGHT_TOPIC;
+                }
+                break;
+            case WAIT_IN_LIGHT_TOPIC:
+                if (Serial.available()) {
+                    String topic = Serial.readStringUntil('\r');
+                    strcpy(config.Light_topic, topic.c_str());
+                    wait_Serial_clear();
+                    CLI_PRINT(">> AdafruitIO Light Topic: ");
+                    CLI_PRINTLN(config.Light_topic);
+                    CLI_PRINTLN("8. Enter Pir Topic: ");
+                    state = WAIT_IN_PIR_TOPIC;
+                }
+                break;
+            case WAIT_IN_PIR_TOPIC:
+                if (Serial.available()) {
+                    String topic = Serial.readStringUntil('\r');
+                    strcpy(config.pir_topic, topic.c_str());
+                    wait_Serial_clear();
+                    CLI_PRINT(">> AdafruitIO Pir Topic: ");
+                    CLI_PRINTLN(config.pir_topic);
+                    CLI_PRINTLN("8. Enter WS2812 Topic: ");
+                    state = WAIT_IN_WS2812_TOPIC;
+                }
+                break;
+            case WAIT_IN_WS2812_TOPIC:
+                if (Serial.available()) {
+                    String topic = Serial.readStringUntil('\r');
+                    strcpy(config.ws2812_topic, topic.c_str());
+                    wait_Serial_clear();
+                    CLI_PRINT(">> AdafruitIO WS2812 Topic: ");
+                    CLI_PRINTLN(config.ws2812_topic);
+                    CLI_PRINTLN("8. Enter RFID Topic: ");
+                    state = WAIT_IN_RFID_TOPIC;
+                }
+                break;
+            case WAIT_IN_RFID_TOPIC:
+                if (Serial.available()) {
+                    String topic = Serial.readStringUntil('\r');
+                    strcpy(config.rfid_topic, topic.c_str());
+                    wait_Serial_clear();
+                    CLI_PRINT(">> AdafruitIO RFID Topic: ");
+                    CLI_PRINTLN(config.rfid_topic);
+                    CLI_PRINTLN("8. Enter Fire Topic: ");
+                    state = WAIT_IN_FIRE_TOPIC;
+                }
+                break;
+            case WAIT_IN_FIRE_TOPIC:
+                if (Serial.available()) {
+                    String topic = Serial.readStringUntil('\r');
+                    strcpy(config.fire_topic, topic.c_str());
+                    wait_Serial_clear();
+                    CLI_PRINT(">> AdafruitIO Fire Topic: ");
+                    CLI_PRINTLN(config.fire_topic);
+                    CLI_PRINTLN("8. Enter Buzzer Topic: ");
+                    state = WAIT_IN_BUZZER_TOPIC;
+                }
+                break;
+            case WAIT_IN_BUZZER_TOPIC:
+                if (Serial.available()) {
+                    String topic = Serial.readStringUntil('\r');
+                    strcpy(config.buzzer_topic, topic.c_str());
+                    wait_Serial_clear();
+                    CLI_PRINT(">> AdafruitIO Buzzer Topic: ");
+                    CLI_PRINTLN(config.buzzer_topic);
+                    CLI_PRINTLN("Save to EEPROM...");
+                    state = IDLE;
+                    EEPROM.put(EEPROM_ADDR, config);
+                }
+                break;
+            default:
+                break;
+            }
+        } break;
+        default:
+            break;
+        }
+    } break;
+    default:
+        state = WAIT_START;
+        break;
+    }
+}
+
+void Task_AdafriotIO(void)
+{
+    static uint32_t      timer          = 0;
+    static uint8_t       state          = WIFI_BEGIN;
+    static unsigned long pub_data_timer = millis() + PUB_DATA_INTERVAL;
+    adafruitio_state                    = state;
+
+    switch (cur_mode) {
+    case MQTT_MODE: {
+        switch (state) {
+        case WIFI_BEGIN: {
+            WiFi.begin(config.wifi_ssid, config.wifi_pass);
+            state = WIFI_WAIT;
+        }
+        case WIFI_WAIT:
+            if (WiFi.status() == WL_CONNECTED) {
+                state = MQTT_INIT;
+            } else {
+                timer = millis() + 10000;
+                state = WIFI_WAIT_10_S;
+            }
+            break;
+        case MQTT_INIT:
+            obj_mqttClient.disconnect();
+            obj_mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
+            obj_mqttClient.setKeepAlive(MQTT_ADAIO_KEEPALIVE);
+            obj_mqttClient.setCallback(mqttCallback);
+            state = MQTT_CONNECTING;
+        case MQTT_CONNECTING:
+            if (obj_mqttClient.connect(config.device_id, config.mqtt_user, config.mqtt_pass)) {
+                // Subscribe
+                obj_mqttClient.subscribe(config.ws2812_topic);
+                obj_mqttClient.subscribe(config.buzzer_topic);
+                state = MQTT_READY;
+            } else {
+                timer = millis() + 10000;
+                state = MQTT_WAIT_10_S;
+            }
+            break;
+        case MQTT_READY:
+            if (obj_mqttClient.connected()) {
+                if (millis() > pub_data_timer) {
+                    pub_data_timer = millis() + PUB_DATA_INTERVAL;
+                    obj_mqttClient.publish(config.temp_topic, String(m_temperature).c_str());
+                    obj_mqttClient.publish(config.humi_topic, String(m_humidity).c_str());
+                    obj_mqttClient.publish(config.Light_topic, String(m_light_raw).c_str());
+                }
+                if (m_uKeyCode_Pir == _KEYCODE_F_EDGE) {
+                    obj_mqttClient.publish(config.pir_topic, String(m_pir).c_str());
+                }
+                if (m_uKeyCode_Fire == _KEYCODE_F_EDGE) {
+                    obj_mqttClient.publish(config.fire_topic, String(m_fire).c_str());
+                }
+                if (rfid_detect_flag) {
+                    obj_mqttClient.publish(config.rfid_topic, detect_rfid_id.c_str());
+                }
+            } else {
+                state = MQTT_CONNECTING;
+                break;
+            }
+            obj_mqttClient.loop();
+            break;
+        case MQTT_WAIT_10_S:
+            if (millis() > timer) {
+                state = MQTT_CONNECTING;
+            }
+            break;
+        case WIFI_WAIT_10_S:
+            if (millis() > timer) {
+                state = WIFI_BEGIN;
+            }
+            break;
+        default:
+            M_DEBUG_PRINTLN("MQTTTask >> unknown state!!");
+            break;
+        }
+    } break;
+    default:
+        state = WIFI_BEGIN;
+        break;
+    }
+}
+
+void mqttCallback(char *topic, byte *payload, unsigned int length)
+{
+#if DEBUG_MODE
+    M_DEBUG_PRINT("Message arrived [");
+    M_DEBUG_PRINT(topic);
+    M_DEBUG_PRINT("] ");
+    for (int i = 0; i < (int)length; i++) {
+        M_DEBUG_PRINT((char)payload[i]);
+    }
+    M_DEBUG_PRINTLN();
+#endif
+    if (strcmp((const char *)topic, config.buzzer_topic) == 0) {
+        if (strcmp((const char *)payload, "ON")) {
+            mqtt_buzzer_flag = true;
+        } else if (strcmp((const char *)payload, "OFF") == 0) {
+            mqtt_buzzer_flag = false;
+        }
+    } else if (strcmp((const char *)topic, config.ws2812_topic) == 0) {
+        const char *tmp   = String((const char *)payload).c_str();
+        mqtt_ws2812_color = strtol(&tmp[1], NULL, 16);
+        mqtt_ws2812_flag  = true;
+    }
+}
+
+void wait_Serial_clear(void)
+{
+    while (Serial.available()) {
+        Serial.read();
     }
 }
 
