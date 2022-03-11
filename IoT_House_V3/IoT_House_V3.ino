@@ -212,24 +212,25 @@ void Task_Mode(void)
 void Task_LCD(void)
 {
     static uint32_t timer    = 0;
-    static uint8_t  pre_page = 0, pre_mode = 0;
+    static uint8_t  pre_page = 0, pre_mode = 0, pre_adafruitio_state = 0;
     static String   show_rfid = ID_NULL;
 
-    if (pre_page != cur_page || pre_mode != cur_mode) {
-        pre_page  = cur_page;
-        pre_mode  = cur_mode;
-        show_rfid = ID_NULL;
+    if (pre_page != cur_page || pre_mode != cur_mode || pre_adafruitio_state != adafruitio_state) {
+        pre_adafruitio_state = adafruitio_state;
+        pre_page             = cur_page;
+        pre_mode             = cur_mode;
+        show_rfid            = ID_NULL;
         obj_lcd.clear();
     }
 
-    if (millis() > timer) {
-        timer         = millis() + 150;
-        char buff[20] = {0};
+    char buff[20] = {0};
 
-        sprintf(buff, "   IoT House V%.1f  %c", VERSION, sys_modes[cur_mode].mode_tag);
-        lcd_print(0, 0, buff);
-        switch (cur_mode) {
-        case AUTO_MODE: {
+    sprintf(buff, "   IoT House V%.1f  %c", VERSION, sys_modes[cur_mode].mode_tag);
+    lcd_print(0, 0, buff);
+    switch (cur_mode) {
+    case AUTO_MODE: {
+        if (millis() > timer) {
+            timer = millis() + 150;
             switch (cur_page) {
             case 1: {
                 sprintf(buff, " Temp:%.0f  PIR :%s ", m_temperature, m_pir ? TRIG_STR : IDLE_STR);
@@ -252,32 +253,35 @@ void Task_LCD(void)
             } else {
                 show_rfid = detect_rfid_id;
             }
-        } break;
-        case MANUAL_MODE: {
+        }
+    } break;
+    case MANUAL_MODE: {
+        if (millis() > timer) {
+            timer = millis() + 150;
             lcd_print(0, 2, (char *)" Open Linkit Remote ");
-        } break;
-        case MQTT_MODE: {
-            lcd_print(0, 1, (char *)"  Open AdafruitIO   ");
-            switch (adafruitio_state) {
-            case WIFI_BEGIN:
-                sprintf(buff, "Connect WiFi to %s", config.wifi_ssid);
-                lcd_print(0, 2, buff);
-                obj_lcd.clear();
-                break;
-            case MQTT_CONNECTING:
-                lcd_print(0, 2, (char *)"Connect AdafruitIO  ");
-                sprintf(buff, "Username: %s", config.mqtt_user);
-                lcd_print(0, 3, buff);
-                obj_lcd.clear();
-                break;
-            case MQTT_READY:
-                lcd_print(0, 2, (char *)"Connected AdafruitIO");
-                break;
-            default:
-                break;
-            }
-        } break;
-        case SET_MODE: {
+        }
+    } break;
+    case MQTT_MODE: {
+        switch (adafruitio_state) {
+        case WIFI_BEGIN:
+            lcd_print(0, 1, (char *)"WIFI Connecting...  ");
+            lcd_print(0, 2, config.wifi_ssid);
+            break;
+        case MQTT_CONNECTING:
+            lcd_print(0, 1, (char *)"MQTT Connecting...  ");
+            lcd_print(0, 2, config.mqtt_user);
+            break;
+        case MQTT_READY:
+            lcd_print(0, 1, (char *)"   MQTT Connected   ");
+            lcd_print(0, 2, (char *)"   Open AdafruitIO  ");
+            break;
+        default:
+            break;
+        }
+    } break;
+    case SET_MODE: {
+        if (millis() > timer) {
+            timer = millis() + 150;
             switch (cur_page) {
             case 1: {
                 lcd_print(0, 1, (char *)"Input New RFID Card:");
@@ -293,10 +297,10 @@ void Task_LCD(void)
             if (rfid_detect_flag) {
                 show_rfid = detect_rfid_id;
             }
-        } break;
-        default:
-            break;
         }
+    } break;
+    default:
+        break;
     }
 }
 
@@ -365,6 +369,7 @@ void Task_RFID(void)
         switch (cur_mode) {
         case AUTO_MODE: {
         case MANUAL_MODE:
+        case MQTT_MODE:
             detect_rfid_id = content;
             break;
         case SET_MODE:
@@ -468,7 +473,14 @@ void Task_WS2812(void)
 
 void Task_Buzzer(void)
 {
-    static uint32_t timer = 0;
+    static uint32_t timer            = 0;
+    static uint8_t  pre_mode         = 0;
+    static bool     pre_buzzer_state = false;
+
+    if (pre_mode != cur_mode) {
+        pre_mode = cur_mode;
+        noTone(BUZZER_PIN);
+    }
 
     switch (cur_mode) {
     case AUTO_MODE: {
@@ -495,21 +507,20 @@ void Task_Buzzer(void)
             tone(BUZZER_PIN, BUZZER_La);
             timer = millis() + 100;
         }
+
+        if (millis() > timer) {
+            noTone(BUZZER_PIN);
+        }
     } break;
     case MANUAL_MODE: {
-        if (rfid_detect_flag || m_uKeyCode_JoyBtn == _KEYCODE_F_EDGE) {
-            tone(BUZZER_PIN, BUZZER_Fa);
-            timer = millis() + 100;
-        }
-
-        if (m_uKeyCode_JoyBtn == _KEYCODE_REPEAT && m_KeyPolling_JoyBtn_Tag.uRepeatCount >= 3) {
-            tone(BUZZER_PIN, BUZZER_La);
-            timer = millis() + 100;
-        }
         bool btn_state = (bool)LRSwitch_Buzzer.getValue();
-        if (btn_state) {
-            tone(BUZZER_PIN, BUZZER_Si);
-            timer = millis() + 200;
+        if (pre_buzzer_state != btn_state) {
+            pre_buzzer_state = btn_state;
+            if (btn_state) {
+                tone(BUZZER_PIN, BUZZER_Si);
+            } else {
+                noTone(BUZZER_PIN);
+            }
         }
     } break;
     case SET_MODE: {
@@ -522,20 +533,22 @@ void Task_Buzzer(void)
             tone(BUZZER_PIN, BUZZER_La);
             timer = millis() + 100;
         }
+        if (millis() > timer) {
+            noTone(BUZZER_PIN);
+        }
     } break;
     case MQTT_MODE: {
-        if (mqtt_buzzer_flag) {
-            tone(BUZZER_PIN, BUZZER_Si);
-        } else {
-            noTone(BUZZER_PIN);
+        if (pre_buzzer_state != mqtt_buzzer_flag) {
+            pre_buzzer_state = mqtt_buzzer_flag;
+            if (mqtt_buzzer_flag) {
+                tone(BUZZER_PIN, BUZZER_Si);
+            } else {
+                noTone(BUZZER_PIN);
+            }
         }
     } break;
     default:
         break;
-    }
-
-    if (millis() > timer) {
-        noTone(BUZZER_PIN);
     }
 }
 
@@ -725,9 +738,10 @@ void Task_CLI_SetMode(void)
                     wait_Serial_clear();
                     CLI_PRINT(">> AdafruitIO Buzzer Topic: ");
                     CLI_PRINTLN(config.buzzer_topic);
-                    CLI_PRINTLN("Save to EEPROM...");
+                    CLI_PRINT("Save to EEPROM...");
                     state = IDLE;
                     EEPROM.put(EEPROM_ADDR, config);
+                    CLI_PRINTLN("Success");
                 }
                 break;
             default:
@@ -749,7 +763,9 @@ void Task_AdafriotIO(void)
     static uint32_t      timer          = 0;
     static uint8_t       state          = WIFI_BEGIN;
     static unsigned long pub_data_timer = millis() + PUB_DATA_INTERVAL;
-    adafruitio_state                    = state;
+    static String        pre_rfid_id    = "";
+
+    adafruitio_state = state;
 
     switch (cur_mode) {
     case MQTT_MODE: {
@@ -792,13 +808,22 @@ void Task_AdafriotIO(void)
                     obj_mqttClient.publish(config.Light_topic, String(m_light_raw).c_str());
                 }
                 if (m_uKeyCode_Pir == _KEYCODE_F_EDGE) {
-                    obj_mqttClient.publish(config.pir_topic, String(m_pir).c_str());
+                    obj_mqttClient.publish(config.pir_topic, "1");
+                } else if (m_uKeyCode_Pir == _KEYCODE_R_EDGE) {
+                    obj_mqttClient.publish(config.pir_topic, "0");
                 }
                 if (m_uKeyCode_Fire == _KEYCODE_F_EDGE) {
-                    obj_mqttClient.publish(config.fire_topic, String(m_fire).c_str());
+                    obj_mqttClient.publish(config.fire_topic, "1");
+                } else if (m_uKeyCode_Fire == _KEYCODE_R_EDGE) {
+                    // TODO: 不要用Delay
+                    delay(1000);
+                    obj_mqttClient.publish(config.fire_topic, "0");
                 }
                 if (rfid_detect_flag) {
-                    obj_mqttClient.publish(config.rfid_topic, detect_rfid_id.c_str());
+                    if (pre_rfid_id != detect_rfid_id) {
+                        pre_rfid_id = detect_rfid_id;
+                        obj_mqttClient.publish(config.rfid_topic, detect_rfid_id.c_str());
+                    }
                 }
             } else {
                 state = MQTT_CONNECTING;
@@ -838,14 +863,18 @@ void mqttCallback(char *topic, byte *payload, unsigned int length)
     }
     M_DEBUG_PRINTLN();
 #endif
-    if (strcmp((const char *)topic, config.buzzer_topic) == 0) {
-        if (strcmp((const char *)payload, "ON")) {
+    if (strcmp((const char *)topic, (const char *)config.buzzer_topic) == 0) {
+        if (strncmp((const char *)payload, "ON", length) == 0) {
+            M_DEBUG_PRINTLN("ON");
             mqtt_buzzer_flag = true;
-        } else if (strcmp((const char *)payload, "OFF") == 0) {
+        } else if (strncmp((const char *)payload, "OFF", length) == 0) {
+            M_DEBUG_PRINTLN("OFF");
             mqtt_buzzer_flag = false;
         }
-    } else if (strcmp((const char *)topic, config.ws2812_topic) == 0) {
-        const char *tmp   = String((const char *)payload).c_str();
+    } else if (strcmp((const char *)topic, (const char *)config.ws2812_topic) == 0) {
+        char buff[10] = {0};
+        strncpy(buff, (const char *)payload, length);
+        const char *tmp   = String(buff).c_str();
         mqtt_ws2812_color = strtol(&tmp[1], NULL, 16);
         mqtt_ws2812_flag  = true;
     }

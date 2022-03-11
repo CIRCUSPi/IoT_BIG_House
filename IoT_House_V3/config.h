@@ -150,7 +150,7 @@ typedef struct {
 typedef struct {
     char wifi_ssid[30];
     char wifi_pass[30];
-    char rfid_uid[8];
+    char rfid_uid[10];
     char mqtt_user[30];
     char mqtt_pass[60];
     char device_id[30];
