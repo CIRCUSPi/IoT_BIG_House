@@ -26,11 +26,11 @@
 // 7697  /  EZDIO
 #define DHT11_PIN 16           // IO2
 #define LIGHT_PIN 17           // IO3
-#define PIR_PIN 3              // IO9
+#define WS2812_PIN 3           // IO9
 #define JOYSTICK_X_PIN 14      // IO0
 #define JOYSTICK_Y_PIN 15      // IO1
 #define JOYSTICK_BTN_PIN 2     // IO8
-#define WS2812_PIN 7           // IO15
+#define PIR_PIN 7              // IO15
 #define RFID_SS_PIN 10         // IO7
 #define FIRE_PIN 5             // IO13
 #define BUZZER_PIN 4           // IO16

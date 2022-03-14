@@ -150,6 +150,12 @@ void loop()
 
 void Task_Mode(void)
 {
+    static uint8_t pre_mode = AUTO_MODE;
+
+    if (pre_mode != cur_mode) {
+        pre_mode                             = cur_mode;
+        m_KeyPolling_JoyBtn_Tag.uRepeatCount = 0;
+    }
     switch (cur_mode) {
     case AUTO_MODE: {
         switch (cur_page) {
@@ -161,8 +167,11 @@ void Task_Mode(void)
             if (m_uKeyCode_JoyX_R == _KEYCODE_F_EDGE) {
                 cur_page++;
             }
-            if (m_uKeyCode_JoyBtn == _KEYCODE_F_EDGE) {
-                next_mode();
+            if (m_uKeyCode_JoyBtn == _KEYCODE_R_EDGE) {
+                change_mode(MANUAL_MODE);
+            }
+            if (m_uKeyCode_JoyBtn == _KEYCODE_REPEAT && m_KeyPolling_JoyBtn_Tag.uRepeatCount >= 3) {
+                change_mode(SET_MODE);
             }
         } break;
         default:
@@ -170,13 +179,19 @@ void Task_Mode(void)
         }
     } break;
     case MANUAL_MODE: {
-        if (m_uKeyCode_JoyBtn == _KEYCODE_F_EDGE) {
-            next_mode();
+        if (m_uKeyCode_JoyBtn == _KEYCODE_R_EDGE) {
+            change_mode(MQTT_MODE);
+        }
+        if (m_uKeyCode_JoyBtn == _KEYCODE_REPEAT && m_KeyPolling_JoyBtn_Tag.uRepeatCount >= 3) {
+            change_mode(SET_MODE);
         }
     } break;
     case MQTT_MODE: {
-        if (m_uKeyCode_JoyBtn == _KEYCODE_F_EDGE) {
-            next_mode();
+        if (m_uKeyCode_JoyBtn == _KEYCODE_R_EDGE) {
+            change_mode(AUTO_MODE);
+        }
+        if (m_uKeyCode_JoyBtn == _KEYCODE_REPEAT && m_KeyPolling_JoyBtn_Tag.uRepeatCount >= 3) {
+            change_mode(SET_MODE);
         }
     } break;
     case SET_MODE: {
@@ -189,7 +204,7 @@ void Task_Mode(void)
             if (m_uKeyCode_JoyX_R == _KEYCODE_F_EDGE) {
                 cur_page++;
             }
-            if (m_uKeyCode_JoyBtn == _KEYCODE_REPEAT && m_KeyPolling_JoyBtn_Tag.uRepeatCount >= 3) {
+            if (m_uKeyCode_JoyBtn == _KEYCODE_REPEAT && m_KeyPolling_JoyBtn_Tag.uRepeatCount >= 6) {
                 change_mode(AUTO_MODE);
             }
         } break;
@@ -683,7 +698,7 @@ void Task_CLI_SetMode(void)
                     wait_Serial_clear();
                     CLI_PRINT(">> AdafruitIO Light Topic: ");
                     CLI_PRINTLN(config.Light_topic);
-                    CLI_PRINTLN("8. Enter Pir Topic: ");
+                    CLI_PRINTLN("9. Enter Pir Topic: ");
                     state = WAIT_IN_PIR_TOPIC;
                 }
                 break;
@@ -694,7 +709,7 @@ void Task_CLI_SetMode(void)
                     wait_Serial_clear();
                     CLI_PRINT(">> AdafruitIO Pir Topic: ");
                     CLI_PRINTLN(config.pir_topic);
-                    CLI_PRINTLN("8. Enter WS2812 Topic: ");
+                    CLI_PRINTLN("10. Enter WS2812 Topic: ");
                     state = WAIT_IN_WS2812_TOPIC;
                 }
                 break;
@@ -705,7 +720,7 @@ void Task_CLI_SetMode(void)
                     wait_Serial_clear();
                     CLI_PRINT(">> AdafruitIO WS2812 Topic: ");
                     CLI_PRINTLN(config.ws2812_topic);
-                    CLI_PRINTLN("8. Enter RFID Topic: ");
+                    CLI_PRINTLN("11. Enter RFID Topic: ");
                     state = WAIT_IN_RFID_TOPIC;
                 }
                 break;
@@ -716,7 +731,7 @@ void Task_CLI_SetMode(void)
                     wait_Serial_clear();
                     CLI_PRINT(">> AdafruitIO RFID Topic: ");
                     CLI_PRINTLN(config.rfid_topic);
-                    CLI_PRINTLN("8. Enter Fire Topic: ");
+                    CLI_PRINTLN("12. Enter Fire Topic: ");
                     state = WAIT_IN_FIRE_TOPIC;
                 }
                 break;
@@ -727,7 +742,7 @@ void Task_CLI_SetMode(void)
                     wait_Serial_clear();
                     CLI_PRINT(">> AdafruitIO Fire Topic: ");
                     CLI_PRINTLN(config.fire_topic);
-                    CLI_PRINTLN("8. Enter Buzzer Topic: ");
+                    CLI_PRINTLN("13. Enter Buzzer Topic: ");
                     state = WAIT_IN_BUZZER_TOPIC;
                 }
                 break;
