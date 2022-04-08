@@ -167,7 +167,7 @@ void Task_Mode(void)
             if (m_uKeyCode_JoyX_R == _KEYCODE_F_EDGE) {
                 cur_page++;
             }
-            if (m_uKeyCode_JoyBtn == _KEYCODE_R_EDGE) {
+            if (m_uKeyCode_JoyBtn == _KEYCODE_F_EDGE) {
                 change_mode(MANUAL_MODE);
             }
             if (m_uKeyCode_JoyBtn == _KEYCODE_REPEAT && m_KeyPolling_JoyBtn_Tag.uRepeatCount >= 3) {
@@ -179,7 +179,7 @@ void Task_Mode(void)
         }
     } break;
     case MANUAL_MODE: {
-        if (m_uKeyCode_JoyBtn == _KEYCODE_R_EDGE) {
+        if (m_uKeyCode_JoyBtn == _KEYCODE_F_EDGE) {
             change_mode(MQTT_MODE);
         }
         if (m_uKeyCode_JoyBtn == _KEYCODE_REPEAT && m_KeyPolling_JoyBtn_Tag.uRepeatCount >= 3) {
@@ -187,7 +187,7 @@ void Task_Mode(void)
         }
     } break;
     case MQTT_MODE: {
-        if (m_uKeyCode_JoyBtn == _KEYCODE_R_EDGE) {
+        if (m_uKeyCode_JoyBtn == _KEYCODE_F_EDGE) {
             change_mode(AUTO_MODE);
         }
         if (m_uKeyCode_JoyBtn == _KEYCODE_REPEAT && m_KeyPolling_JoyBtn_Tag.uRepeatCount >= 3) {
