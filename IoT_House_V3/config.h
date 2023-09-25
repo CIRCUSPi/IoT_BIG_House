@@ -10,14 +10,14 @@
 #define HARDWARE_DEBUG_LCD true
 #define HARDWARE_DEBUG_RFID true
 
-#define DEBUG_MODE true
+#define DEBUG_MODE false
 #if DEBUG_MODE
 #define debugSerial Serial
 #define M_DEBUG_PRINT(x) debugSerial.print(x)
 #define M_DEBUG_PRINTLN(x) debugSerial.println(x)
 #else
-#define DEBUG_PRINT(x)
-#define DEBUG_PRINTLN(x)
+#define M_DEBUG_PRINT(x)
+#define M_DEBUG_PRINTLN(x)
 #endif
 
 #define CLI_PRINT(x) Serial.print(x)

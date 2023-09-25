@@ -346,7 +346,7 @@ void Task_ReadSensorData(void)
         M_DEBUG_PRINTLN("Sensor sampling");
 #endif
         m_temperature = obj_dht11.readTemperature(false);
-        m_humidity    = obj_dht11.readHumidity(false);
+        m_humidity    = obj_dht11.readHumidity();
     }
     m_light_raw                 = analogRead(LIGHT_PIN);
     m_joystick_btn              = digitalRead(JOYSTICK_BTN_PIN);
@@ -950,7 +950,7 @@ void ws2812SetShow(uint16_t ws2812_mode, uint32_t color)
 void change_mode(uint8_t new_mode)
 {
     if (new_mode >= MAX_MODE) {
-        DEBUG_PRINTLN(F("out of mode range!"));
+        M_DEBUG_PRINTLN(F("out of mode range!"));
         return;
     }
     cur_page = 1;
