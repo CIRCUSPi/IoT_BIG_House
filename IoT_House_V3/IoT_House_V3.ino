@@ -341,7 +341,7 @@ void Task_ReadSensorData(void)
 
     uint32_t cur_millis = millis();
     if (cur_millis > timer) {
-        timer = cur_millis + 200;
+        timer = cur_millis + 6000;
 #if HARDWARE_DEBUG
         M_DEBUG_PRINTLN("Sensor sampling");
 #endif
