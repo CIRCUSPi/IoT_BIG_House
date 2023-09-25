@@ -111,7 +111,7 @@ void setup()
     obj_ws2812.begin();
     obj_lcd.begin(20, 4);
     obj_rc522.PCD_Init();
-    obj_ws2812.setBrightness(50);
+    obj_ws2812.setBrightness(200);
     obj_ws2812.clear();
     obj_ws2812.show();
 
@@ -341,7 +341,7 @@ void Task_ReadSensorData(void)
 
     uint32_t cur_millis = millis();
     if (cur_millis > timer) {
-        timer = cur_millis + 200;
+        timer = cur_millis + 6000;
 #if HARDWARE_DEBUG
         M_DEBUG_PRINTLN("Sensor sampling");
 #endif
