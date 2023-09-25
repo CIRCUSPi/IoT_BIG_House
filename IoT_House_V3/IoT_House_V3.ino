@@ -350,7 +350,7 @@ void Task_ReadSensorData(void)
     }
     m_light_raw                 = analogRead(LIGHT_PIN);
     m_joystick_btn              = digitalRead(JOYSTICK_BTN_PIN);
-    m_pir                       = !digitalRead(PIR_PIN);
+    m_pir                       = digitalRead(PIR_PIN);
     m_fire                      = !digitalRead(FIRE_PIN);
     m_KeyPolling_Pir_Tag.bFlag  = !m_pir;
     m_KeyPolling_Fire_Tag.bFlag = !m_fire;
