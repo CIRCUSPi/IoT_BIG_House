@@ -95,9 +95,8 @@ LRemoteLabel  LRLable_RFID;
 
 void setup()
 {
-#if DEBUG_MODE
-    debugSerial.begin(115200);
-#endif
+    Serial.begin(115200);
+
     SPI.begin();
     pinMode(LIGHT_PIN, INPUT);
     pinMode(PIR_PIN, INPUT);
